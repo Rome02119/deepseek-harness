@@ -709,6 +709,36 @@ describe('Team shared task DAG', () => {
     await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, verifier.id)])
   })
 
+  it('derives verifier identity so accepted receipts remain replayable', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const author = await waitRunning(ctx, (await spawn(ctx, lead, 'author')).member.id)
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'verifier')).member.id)
+    const task = await ctx.agentTeams.createTask(author, { subject: 'gate', description: 'gate' })
+    const claimed = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    const submitted = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
+    })
+
+    await ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(author, 'forged-author'),
+    })
+
+    expect(() => foldTeam(lead.id, lead.session.events)).not.toThrow()
+    expect(durable(lead).tasks.find(candidate => candidate.id === task.id)?.receipt).toMatchObject({
+      verifierId: verifier.id,
+      verifierName: 'verifier',
+    })
+
+    ctx.agentTeams.interrupt(lead, 'author')
+    ctx.agentTeams.interrupt(lead, 'verifier')
+    await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, verifier.id)])
+  })
+
   it('rejects malformed scopes and every invalid dependency relation', async () => {
     const { ctx, lead } = await setup([])
     const first = await ctx.agentTeams.createTask(lead, { subject: 'one', description: 'one' })

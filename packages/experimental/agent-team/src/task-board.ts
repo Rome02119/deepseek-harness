@@ -169,11 +169,15 @@ export class TeamTaskBoard {
           next = { ...current, status: 'in_review' }
           break
         case 'verify': {
-          const receipt = request.receipt
-          if (receipt === undefined) throw new TeamError('verify requires a receipt', 'TEAM_INVALID_ARGUMENT')
+          if (request.receipt === undefined) throw new TeamError('verify requires a receipt', 'TEAM_INVALID_ARGUMENT')
           if (current.status !== 'in_review') throw new TeamError('only an in-review task can be verified', 'TEAM_TASK_INVALID_TRANSITION')
           if (current.ownerId === caller.id) {
             throw new TeamError('a task cannot be verified by its own author', 'TEAM_SELF_GRADING')
+          }
+          const receipt = {
+            ...request.receipt,
+            verifierId: caller.id,
+            verifierName: resolveActiveMember(root, state, membership.name).name,
           }
           if (receipt.dirty) throw new TeamError('verification requires a clean tree', 'TEAM_DIRTY_TREE')
           if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
