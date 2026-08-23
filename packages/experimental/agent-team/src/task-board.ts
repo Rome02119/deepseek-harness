@@ -278,8 +278,14 @@ export class TeamTaskBoard {
         default:
           throw new TeamError(`unsupported task action ${String(request.action)}`, 'TEAM_INVALID_ARGUMENT')
       }
+      const contributed = request.action === 'claim'
+        || owner && (request.action === 'renew'
+          || request.action === 'edit'
+          || request.action === 'set_dependencies'
+          || request.action === 'complete'
+          || request.action === 'release')
       const task: TeamTaskSnapshot = {
-        ...next,
+        ...(contributed ? this.withAuthor(next, caller.id) : next),
         revision: current.revision + 1,
       }
       assertTaskCounterTransition(current, task)
@@ -331,7 +337,7 @@ export class TeamTaskBoard {
     return task.blockedBy.every(id => state.tasks.get(id)?.status === 'completed')
   }
 
-  /** Assign an owner while retaining append-only task authorship. */
+  /** Assign an owner without treating administrative assignment as contribution. */
   private withOwner(
     task: TeamTaskSnapshot,
     ownerId: SessionId,
@@ -342,8 +348,12 @@ export class TeamTaskBoard {
       ...fields,
       status: 'in_progress',
       ownerId,
-      authorIds: isTaskAuthor(task, ownerId) ? task.authorIds : [...task.authorIds, ownerId],
     }
+  }
+
+  /** Append one contributor to stable task authorship. */
+  private withAuthor(task: TeamTaskSnapshot, authorId: SessionId): TeamTaskSnapshot {
+    return isTaskAuthor(task, authorId) ? task : { ...task, authorIds: [...task.authorIds, authorId] }
   }
 
   /** Remove an optional owner field under exactOptionalPropertyTypes. */

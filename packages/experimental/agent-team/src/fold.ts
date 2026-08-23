@@ -194,10 +194,10 @@ export function isActiveTeamMember(state: TeamFoldState, memberId: SessionId): b
 }
 
 /**
- * Test whether a member has ever owned a task.
+ * Test whether a member has contributed to a task.
  * @param task - task with durable authorship history.
  * @param memberId - candidate verifier Session id.
- * @returns whether the member contributed as an owner.
+ * @returns whether the member contributed to the task.
  */
 export function isTaskAuthor(
   task: Pick<TeamTaskSnapshot, 'authorIds'>,
@@ -331,9 +331,6 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
       const priorStatus = prior?.status
       if (priorStatus === undefined ? task.status !== 'pending' : !teamTaskTransitions[priorStatus].includes(task.status)) {
         throw new Error(`team task "${task.id}" has an invalid ${priorStatus ?? 'new'} -> ${task.status} transition`)
-      }
-      if (task.ownerId !== undefined && !isTaskAuthor(task, task.ownerId)) {
-        throw new Error(`team task "${task.id}" owner is missing from authorIds`)
       }
       if (prior !== undefined) {
         if (!prior.authorIds.every((id, index) => task.authorIds[index] === id)) {

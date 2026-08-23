@@ -54,7 +54,7 @@ interface TeamMessageSource {
 
 ## Shared task DAG
 
-Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. Claims and renewals record an absolute lease deadline. `authorIds` retains every owner in first-assignment order so no contributor may verify the task; failed verification counters determine when a task becomes blocked. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
+Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. Claims and renewals record an absolute lease deadline. `authorIds` retains contributors in first-action order: claims, reclaims, and owner actions that renew, edit, set dependencies, complete, or release append the acting member, while Lead reassignment does not append the assignee. No contributor may verify the task; failed verification counters determine when a task becomes blocked. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
 
 ```ts
 import type { SessionId } from '@deepseek-ai/dsh-session'

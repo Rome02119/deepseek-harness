@@ -54,7 +54,7 @@ interface TeamMessageSource {
 
 ## 共享任务 DAG
 
-每条 task event 都存储完整快照。`revision` 是 compare-and-set 值，每次变更递增 1。claim 与 renew 会记录绝对租期截止时间。`authorIds` 按首次分配顺序保留每个 owner，确保所有 contributor 都不能验证该任务；verification 失败计数器决定任务何时变为 blocked。`blockedBy` edge 必须指向未删除任务，并维持无环图。`writeScopes` 是规范化的提示性路径前缀，不是锁。
+每条 task event 都存储完整快照。`revision` 是 compare-and-set 值，每次变更递增 1。claim 与 renew 会记录绝对租期截止时间。`authorIds` 按首次行动顺序保留 contributor：claim、reclaim，以及由 owner 执行的 renew、edit、set dependencies、complete 或 release 会追加实际行动的 member，而 Lead reassign 不会追加 assignee。任何 contributor 都不能验证该任务；verification 失败计数器决定任务何时变为 blocked。`blockedBy` edge 必须指向未删除任务，并维持无环图。`writeScopes` 是规范化的提示性路径前缀，不是锁。
 
 ```ts
 import type { SessionId } from '@deepseek-ai/dsh-session'

@@ -278,12 +278,42 @@ describe('Agent Teams fold', () => {
     const reviewed = state.tasks.get(TeamTaskId('task-1'))!
     expect(isActiveTeamMember(state, verification.verifierId)).toBe(true)
     expect(isTaskAuthor(reviewed, verification.verifierId)).toBe(false)
-    expect(() => applyTeamEvent(state, event('team/task', {
+    expect(() => { applyTeamEvent(state, event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
-    }, 5))).not.toThrow()
+    }, 5)) }).not.toThrow()
     expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
+  })
+
+  it('replays verification by an assignee who never acted on the task', () => {
+    const verification = receipt()
+    const records = [
+      ...memberHistory('active'),
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 2),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', ownerId: CHILD, authorIds: [] }),
+      }, 3),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 3, status: 'in_progress', ownerId: ROOT, authorIds: [] }),
+      }, 4),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 4, status: 'in_review', ownerId: ROOT, authorIds: [ROOT] }),
+      }, 5),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 5, status: 'completed', ownerId: ROOT, authorIds: [ROOT], receipt: verification }),
+      }, 6),
+    ]
+
+    expect(() => foldTeam(ROOT, records)).not.toThrow()
   })
 
   it('enforces verification blocking through the shared failure-cap predicate', () => {

@@ -42,7 +42,7 @@ roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idl
 
 ## 共享任务板
 
-任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。claim 会记录绝对时间 `leaseExpiresAt`；只有 owner 可以 renew，租期过期后任意成员都可以 reclaim in-progress 任务。每次 claim、reclaim 或 reassign 都会把 owner 追加到顺序稳定且去重的 `authorIds`；release、reopen 与 unblock 会保留该历史，任何 author 都不能验证任务。view 根据当前时钟派生 `leaseExpired`，回放只携带已记录的时间戳，绝不会仅因时间流逝而改变任务 status 或 owner。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
+任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。claim 会记录绝对时间 `leaseExpiresAt`；只有 owner 可以 renew，租期过期后任意成员都可以 reclaim in-progress 任务。每次 claim 或 reclaim 都会把调用方追加到顺序稳定且去重的 `authorIds`；被分配的 owner 只有在 renew、edit、set_dependencies、complete 或 release 任务后才会加入该列表。Lead reassign 本身既不记录 assignee，也不记录 Lead；任何 author 都不能验证任务。view 根据当前时钟派生 `leaseExpired`，回放只携带已记录的时间戳，绝不会仅因时间流逝而改变任务 status 或 owner。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
 
 依赖必须指向当前未删除任务，并组成完整 DAG，不允许 self edge 或重复 edge。只有所有 blocker 都 completed，pending 任务才 ready。仍被未删除任务依赖的任务不能删除。删除任务作为 tombstone 保留以供回放和维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。
 

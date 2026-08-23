@@ -763,6 +763,78 @@ describe('Team shared task DAG', () => {
     await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, assignee.id)])
   })
 
+  it('permits verification by an assignee who never acts on the task', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const assignee = await waitRunning(ctx, (await spawn(ctx, lead, 'idle-assignee')).member.id)
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'assigned-worker')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'assignment', description: 'administrative assignment' })
+    const assigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'idle-assignee',
+    })
+    const reassigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: assigned.revision, action: 'reassign', owner: 'assigned-worker',
+    })
+    const submitted = await ctx.agentTeams.updateTask(worker, {
+      taskId: task.id, expectedRevision: reassigned.revision, action: 'complete',
+    })
+
+    await expect(ctx.agentTeams.updateTask(assignee, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(assignee, 'idle-assignee'),
+    })).resolves.toMatchObject({ status: 'completed' })
+
+    ctx.agentTeams.interrupt(lead, 'idle-assignee')
+    ctx.agentTeams.interrupt(lead, 'assigned-worker')
+    await Promise.all([waitNoAgent(ctx, assignee.id), waitNoAgent(ctx, worker.id)])
+  })
+
+  it('refuses verification after an assignee renews, edits, and submits the task', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const assignee = await waitRunning(ctx, (await spawn(ctx, lead, 'acting-assignee')).member.id)
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'assignment', description: 'contributed assignment' })
+    let current = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'reassign', owner: 'acting-assignee',
+    })
+    current = await ctx.agentTeams.updateTask(assignee, {
+      taskId: task.id, expectedRevision: current.revision, action: 'renew',
+    })
+    current = await ctx.agentTeams.updateTask(assignee, {
+      taskId: task.id, expectedRevision: current.revision, action: 'edit', subject: 'acted assignment',
+    })
+    current = await ctx.agentTeams.updateTask(assignee, {
+      taskId: task.id, expectedRevision: current.revision, action: 'complete',
+    })
+
+    await expect(ctx.agentTeams.updateTask(assignee, {
+      taskId: task.id,
+      expectedRevision: current.revision,
+      action: 'verify',
+      receipt: receipt(assignee, 'acting-assignee'),
+    })).rejects.toMatchObject({ code: 'TEAM_SELF_GRADING' })
+
+    ctx.agentTeams.interrupt(lead, 'acting-assignee')
+    await waitNoAgent(ctx, assignee.id)
+  })
+
+  it('retains authorship after a claimant releases the task', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const author = await waitRunning(ctx, (await spawn(ctx, lead, 'releasing-author')).member.id)
+    const task = await ctx.agentTeams.createTask(author, { subject: 'release', description: 'released contribution' })
+    const claimed = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'release',
+    })
+
+    expect(durable(lead).tasks.find(candidate => candidate.id === task.id)?.authorIds).toEqual([author.id])
+
+    ctx.agentTeams.interrupt(lead, 'releasing-author')
+    await waitNoAgent(ctx, author.id)
+  })
+
   it('retains unique ordered task authors through owner removal and unblock', async () => {
     const { ctx, lead } = await setup(['hang', 'hang', 'hang'], { leaseDurationMs: 1_000 })
     const first = await waitRunning(ctx, (await spawn(ctx, lead, 'first-author')).member.id)
@@ -785,7 +857,7 @@ describe('Team shared task DAG', () => {
     current = await ctx.agentTeams.updateTask(lead, {
       taskId: task.id, expectedRevision: current.revision, action: 'reassign', owner: 'third-author',
     })
-    expect(authorIds()).toEqual([first.id, second.id, third.id])
+    expect(authorIds()).toEqual([first.id, second.id])
     current = await ctx.agentTeams.updateTask(third, {
       taskId: task.id, expectedRevision: current.revision, action: 'release',
     })
