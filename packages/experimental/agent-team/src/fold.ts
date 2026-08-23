@@ -336,6 +336,15 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
         if (!prior.authorIds.every((id, index) => task.authorIds[index] === id)) {
           throw new Error(`team task "${task.id}" changed prior authorIds`)
         }
+        const appendedAuthorId = task.authorIds[prior.authorIds.length]
+        const extraAuthorId = task.authorIds[prior.authorIds.length + 1]
+        if (extraAuthorId !== undefined) {
+          throw new Error(`team task "${task.id}" appended more than one authorId; offending id "${extraAuthorId}"`)
+        }
+        if (appendedAuthorId !== undefined
+          && appendedAuthorId !== prior.ownerId && appendedAuthorId !== task.ownerId) {
+          throw new Error(`team task "${task.id}" appended authorId "${appendedAuthorId}" without prior or next ownership`)
+        }
         assertTaskCounterTransition(prior, task)
       }
       if (task.status === 'blocked') {

@@ -21,6 +21,7 @@ import type {
 const ROOT = SessionId('team-root')
 const TEAM = TeamId(ROOT)
 const CHILD = SessionId('child-a')
+const REVIEWER = SessionId('child-b')
 
 function event<T extends SessionEventType>(type: T, data: SessionEventMap[T], seq: number): SessionEvent<T> {
   return { type, data, seq, time: seq } as SessionEvent<T>
@@ -372,6 +373,122 @@ describe('Agent Teams fold', () => {
       }, 3),
     ]
     expect(() => foldTeam(ROOT, records)).toThrow(/changed prior authorIds/)
+  })
+
+  it('rejects a task event that appends an author other than the prior or next owner', () => {
+    const records = [
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT] }),
+      }, 1),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 3, status: 'in_progress', ownerId: CHILD, authorIds: [ROOT, REVIEWER] }),
+      }, 2),
+    ]
+
+    expect(() => foldTeam(ROOT, records))
+      .toThrow(`team task "task-1" appended authorId "${REVIEWER}" without prior or next ownership`)
+  })
+
+  it('rejects a task event that appends two authors', () => {
+    const records = [
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT, CHILD] }),
+      }, 1),
+    ]
+
+    expect(() => foldTeam(ROOT, records))
+      .toThrow(`team task "task-1" appended more than one authorId; offending id "${CHILD}"`)
+  })
+
+  it.each([
+    ['claim append', [
+      task(),
+      task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT] }),
+    ]],
+    ['owner-mutation append', [
+      task(),
+      task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [] }),
+      task({ revision: 3, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT] }),
+    ]],
+    ['release append', [
+      task(),
+      task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [] }),
+      task({ revision: 3, status: 'pending', authorIds: [ROOT] }),
+    ]],
+    ['reassign without append', [
+      task(),
+      task({ revision: 2, status: 'in_progress', ownerId: CHILD, authorIds: [] }),
+    ]],
+  ] as const)('folds a legitimate %s', (_case, snapshots) => {
+    const records = snapshots.map((snapshot, index) => event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: snapshot,
+    }, index))
+
+    expect(() => foldTeam(ROOT, records)).not.toThrow()
+  })
+
+  it('replays an API-accepted claim, renew, release, reclaim, complete, and verify sequence', () => {
+    const records = [
+      event('team/member', {
+        version: 1,
+        teamId: TEAM,
+        member: member({ id: REVIEWER, name: 'reviewer' }),
+      }, 0),
+      event('team/member', {
+        version: 1,
+        teamId: TEAM,
+        member: member({ id: REVIEWER, name: 'reviewer', phase: 'active' }),
+      }, 1),
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 2),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT] }),
+      }, 3),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 3, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT] }),
+      }, 4),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 4, status: 'pending', authorIds: [ROOT] }),
+      }, 5),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 5, status: 'in_progress', ownerId: CHILD, authorIds: [ROOT, CHILD] }),
+      }, 6),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 6, status: 'in_review', ownerId: CHILD, authorIds: [ROOT, CHILD] }),
+      }, 7),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({
+          revision: 7,
+          status: 'completed',
+          ownerId: CHILD,
+          authorIds: [ROOT, CHILD],
+          receipt: receipt({ verifierId: REVIEWER, verifierName: 'reviewer' }),
+        }),
+      }, 8),
+    ]
+
+    expect(() => foldTeam(ROOT, records)).not.toThrow()
   })
 
   it.each([
