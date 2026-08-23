@@ -12,7 +12,7 @@ export const name = 'team-invariant'
 /** Invariant registry required by the companion. */
 export const inject = ['invariants']
 
-/** Validate candidate Team events against the committed prefix before append. */
+/** Validate candidate Team events against current persisted schemas and the committed prefix before append. */
 const install: InvariantInstaller = Object.assign((ctx: Context, fail: InvariantFailure) => {
   ctx.on('internal/dispatch', (_mode, eventName, args) => {
     if (eventName !== 'session/event') return

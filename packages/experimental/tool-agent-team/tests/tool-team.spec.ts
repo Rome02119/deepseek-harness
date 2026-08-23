@@ -245,7 +245,25 @@ describe('dsh-tool-team', () => {
       }, 0)
     })
     await expect(wait).resolves.toMatchObject({ isError: false })
-    expect((await completedCall).isError).toBe(false)
+    const submitted = await completedCall
+    expect(JSON.parse(text(submitted))).toMatchObject({ status: 'in_review' })
+    const verified = await execute(ctx, lead, 'team_task_update', {
+      task_id: task.id,
+      expected_revision: 3,
+      action: 'verify',
+      receipt: {
+        command: 'npx vitest run packages/experimental',
+        exit_code: 0,
+        git_sha: '0123456789abcdef',
+        branch: 'dsh-x/p1-gate',
+        dirty: false,
+        output_digest: 'sha256:verified',
+      },
+    })
+    expect(JSON.parse(text(verified))).toMatchObject({
+      status: 'completed',
+      receipt: { exitCode: 0, verifierName: 'lead', verifierId: lead.id },
+    })
 
     const childInterrupt = await execute(ctx, child, 'interrupt_agent', { target: 'json-worker' })
     expect(childInterrupt.isError).toBe(true)

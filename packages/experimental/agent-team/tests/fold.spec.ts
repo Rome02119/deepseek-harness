@@ -136,6 +136,25 @@ describe('Agent Teams fold', () => {
     }, 1)])).toThrow(/revision is not contiguous/)
   })
 
+  it('accepts an in-review task with a verification receipt', () => {
+    const receipt = {
+      verifierId: CHILD,
+      verifierName: 'worker-a',
+      command: 'pnpm test',
+      exitCode: 0,
+      gitSha: '0123456789abcdef',
+      branch: 'feature',
+      dirty: false,
+      outputDigest: 'sha256:verified',
+    }
+    const state = foldTeam(ROOT, [event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ status: 'in_review', receipt }),
+    }, 0)])
+    expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'in_review', receipt })
+  })
+
   it('rejects every invalid persisted task dependency relation', () => {
     const first = event('team/task', { version: 1, teamId: TEAM, task: task() }, 0)
     const second = event('team/task', {

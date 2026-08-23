@@ -67,4 +67,38 @@ describe('Agent Teams stream invariant', () => {
     }))
     expect(session.events).toEqual([])
   })
+
+  it('accepts an in-review task with a verification receipt', async () => {
+    const ctx = await setup()
+    const session = ctx.sessions.create(SessionId('team-task-review-invariant'))
+    const receipt = {
+      verifierId: SessionId('verifier'),
+      verifierName: 'verifier',
+      command: 'pnpm test',
+      exitCode: 0,
+      gitSha: '0123456789abcdef',
+      branch: 'feature',
+      dirty: false,
+      outputDigest: 'sha256:verified',
+    }
+
+    expect(() => {
+      session.append('team/task', {
+        version: 1,
+        teamId: TeamId(session.id),
+        task: {
+          id: TeamTaskId('task-1'),
+          revision: 1,
+          subject: 'review',
+          description: 'awaiting verification',
+          status: 'in_review',
+          ownerId: SessionId('author'),
+          blockedBy: [],
+          writeScopes: [],
+          receipt,
+        },
+      })
+    }).not.toThrow()
+    expect(session.events[0]?.data).toMatchObject({ task: { status: 'in_review', receipt } })
+  })
 })

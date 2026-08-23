@@ -15,7 +15,7 @@ import * as SubagentSpawn from '@deepseek-ai/dsh-subagent-spawn-in-process'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import TeamService, { foldTeam, TeamError, TeamId, TeamMessageId, TeamTaskId } from '../src/index.ts'
 import { TeamRuntimeLifecycle } from '../src/lifecycle.ts'
-import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot } from '../src/index.ts'
+import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskReceipt, TeamTaskSnapshot } from '../src/index.ts'
 
 const SIGNAL = new AbortController().signal
 const roots: string[] = []
@@ -61,6 +61,24 @@ async function setup(
 
 function content(text: string) {
   return [{ type: 'text' as const, text }]
+}
+
+function receipt(
+  verifier: Agent,
+  verifierName: string,
+  overrides: Partial<TeamTaskReceipt> = {},
+): TeamTaskReceipt {
+  return {
+    verifierId: verifier.id,
+    verifierName,
+    command: 'pnpm test',
+    exitCode: 0,
+    gitSha: '0123456789abcdef',
+    branch: 'feature',
+    dirty: false,
+    outputDigest: 'sha256:verified',
+    ...overrides,
+  }
 }
 
 interface TeamServiceInternals {
@@ -603,12 +621,20 @@ describe('Team shared task DAG', () => {
       action: 'complete',
     })).rejects.toMatchObject({ code: 'TEAM_TASK_STALE_REVISION' })
 
-    const completed = await ctx.agentTeams.updateTask(alpha, {
+    const submitted = await ctx.agentTeams.updateTask(alpha, {
       taskId: first.id,
       expectedRevision: claimed.revision,
       action: 'complete',
     })
-    expect(completed.status).toBe('completed')
+    expect(submitted).toMatchObject({ status: 'in_review', ownerName: 'alpha' })
+    expect(ctx.agentTeams.getTask(beta, second.id).ready).toBe(false)
+    const completed = await ctx.agentTeams.updateTask(beta, {
+      taskId: first.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(beta, 'beta'),
+    })
+    expect(completed).toMatchObject({ status: 'completed', receipt: receipt(beta, 'beta') })
     expect(ctx.agentTeams.getTask(beta, second.id).ready).toBe(true)
     const secondClaim = await ctx.agentTeams.updateTask(beta, {
       taskId: second.id,
@@ -626,6 +652,61 @@ describe('Team shared task DAG', () => {
     ctx.agentTeams.interrupt(lead, 'alpha')
     ctx.agentTeams.interrupt(lead, 'beta')
     await Promise.all([waitNoAgent(ctx, alpha.id), waitNoAgent(ctx, beta.id)])
+  })
+
+  it('rejects invalid verification and records a failed clean gate for retry', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const author = await waitRunning(ctx, (await spawn(ctx, lead, 'author')).member.id)
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'verifier')).member.id)
+    const task = await ctx.agentTeams.createTask(author, { subject: 'gate', description: 'gate' })
+
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id,
+      expectedRevision: task.revision,
+      action: 'verify',
+      receipt: receipt(verifier, 'verifier'),
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    const claimed = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    const submitted = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
+    })
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id, expectedRevision: submitted.revision, action: 'verify',
+    })).rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+    await expect(ctx.agentTeams.updateTask(author, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(author, 'author'),
+    })).rejects.toMatchObject({ code: 'TEAM_SELF_GRADING' })
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(verifier, 'verifier', { dirty: true }),
+    })).rejects.toMatchObject({ code: 'TEAM_DIRTY_TREE' })
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(verifier, 'verifier', { workerProvider: 'spawn', verifierProvider: 'spawn' }),
+    })).rejects.toMatchObject({ code: 'TEAM_SAME_PROVIDER' })
+
+    const failedReceipt = receipt(verifier, 'verifier', { exitCode: 1 })
+    const failed = await ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: failedReceipt,
+    })
+    expect(failed).toMatchObject({ status: 'pending', ready: true, receipt: failedReceipt })
+    expect(failed.ownerName).toBeUndefined()
+
+    ctx.agentTeams.interrupt(lead, 'author')
+    ctx.agentTeams.interrupt(lead, 'verifier')
+    await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, verifier.id)])
   })
 
   it('rejects malformed scopes and every invalid dependency relation', async () => {
@@ -776,8 +857,14 @@ describe('Team shared task DAG', () => {
       taskId: blocker.id, expectedRevision: blocker.revision, action: 'claim',
     })
     expect(leadClaim.ownerName).toBe('lead')
-    const completedBlocker = await ctx.agentTeams.updateTask(lead, {
+    const submittedBlocker = await ctx.agentTeams.updateTask(lead, {
       taskId: blocker.id, expectedRevision: leadClaim.revision, action: 'complete',
+    })
+    const completedBlocker = await ctx.agentTeams.updateTask(editor, {
+      taskId: blocker.id,
+      expectedRevision: submittedBlocker.revision,
+      action: 'verify',
+      receipt: receipt(editor, 'editor'),
     })
     expect(completedBlocker.status).toBe('completed')
     const assigned = await ctx.agentTeams.updateTask(lead, {

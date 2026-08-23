@@ -68,7 +68,21 @@ export interface TeamMemberView {
 }
 
 /** Durable task lifecycle. */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
+export type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'completed' | 'deleted'
+
+/** Durable proof that a non-author ran a gate command against a named commit. */
+export interface TeamTaskReceipt {
+  readonly verifierId: SessionId
+  readonly verifierName: string
+  readonly command: string
+  readonly exitCode: number
+  readonly gitSha: string
+  readonly branch: string
+  readonly dirty: boolean
+  readonly outputDigest: string
+  readonly workerProvider?: string
+  readonly verifierProvider?: string
+}
 
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 export interface TeamTaskSnapshot {
@@ -80,6 +94,7 @@ export interface TeamTaskSnapshot {
   readonly ownerId?: SessionId
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
+  readonly receipt?: TeamTaskReceipt
 }
 
 /** Runtime-enriched task view returned to tools and hosts. */
@@ -91,6 +106,7 @@ export interface TeamTaskView {
   readonly status: TeamTaskStatus
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
+  readonly receipt?: TeamTaskReceipt
   readonly ownerName?: string
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
@@ -179,6 +195,7 @@ export type TeamTaskAction =
   | 'edit'
   | 'set_dependencies'
   | 'complete'
+  | 'verify'
   | 'reopen'
   | 'reassign'
   | 'delete'
@@ -193,6 +210,7 @@ export interface UpdateTeamTaskRequest {
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
   readonly owner?: string
+  readonly receipt?: TeamTaskReceipt
 }
 
 /** Result of waiting for Team activity. */

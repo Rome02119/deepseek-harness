@@ -74,15 +74,29 @@ const teamMemberSnapshotSchema = z.object({
   error: z.string().optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
+const teamTaskReceiptSchema = z.object({
+  verifierId: sessionIdSchema,
+  verifierName: z.string(),
+  command: z.string(),
+  exitCode: z.number(),
+  gitSha: z.string(),
+  branch: z.string(),
+  dirty: z.boolean(),
+  outputDigest: z.string(),
+  workerProvider: z.string().optional(),
+  verifierProvider: z.string().optional(),
+}).strict()
+
 const teamTaskSnapshotSchema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
   subject: z.string(),
   description: z.string(),
-  status: z.enum(['pending', 'in_progress', 'completed', 'deleted']),
+  status: z.enum(['pending', 'in_progress', 'in_review', 'completed', 'deleted']),
   ownerId: sessionIdSchema.optional(),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
+  receipt: teamTaskReceiptSchema.optional(),
 }).strict() as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({

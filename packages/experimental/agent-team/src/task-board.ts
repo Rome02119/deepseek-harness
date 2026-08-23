@@ -166,11 +166,29 @@ export class TeamTaskBoard {
         case 'complete':
           authorizeOwner()
           if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
-          next = { ...current, status: 'completed' }
+          next = { ...current, status: 'in_review' }
           break
+        case 'verify': {
+          const receipt = request.receipt
+          if (receipt === undefined) throw new TeamError('verify requires a receipt', 'TEAM_INVALID_ARGUMENT')
+          if (current.status !== 'in_review') throw new TeamError('only an in-review task can be verified', 'TEAM_TASK_INVALID_TRANSITION')
+          if (current.ownerId === caller.id) {
+            throw new TeamError('a task cannot be verified by its own author', 'TEAM_SELF_GRADING')
+          }
+          if (receipt.dirty) throw new TeamError('verification requires a clean tree', 'TEAM_DIRTY_TREE')
+          if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
+            throw new TeamError('verifier must be a different provider than the worker', 'TEAM_SAME_PROVIDER')
+          }
+          next = receipt.exitCode === 0
+            ? { ...current, status: 'completed', receipt }
+            : this.withoutOwner({ ...current, status: 'pending', receipt })
+          break
+        }
         case 'reopen':
           authorizeOwner()
-          if (current.status !== 'completed') throw new TeamError('only a completed task can reopen', 'TEAM_TASK_INVALID_TRANSITION')
+          if (current.status !== 'completed' && current.status !== 'in_review') {
+            throw new TeamError('only a completed or in-review task can reopen', 'TEAM_TASK_INVALID_TRANSITION')
+          }
           next = this.withoutOwner({ ...current, status: 'pending' })
           break
         case 'reassign': {
@@ -289,6 +307,7 @@ export class TeamTaskBoard {
       status: task.status,
       blockedBy: structuredClone(task.blockedBy),
       writeScopes: structuredClone(task.writeScopes),
+      ...task.receipt === undefined ? {} : { receipt: structuredClone(task.receipt) },
       ...ownerName === undefined ? {} : { ownerName },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],
