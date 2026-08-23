@@ -83,22 +83,23 @@ describe('Agent Teams stream invariant', () => {
     }
 
     expect(() => {
+      const teamId = TeamId(session.id)
+      const task = {
+        id: TeamTaskId('task-1'),
+        subject: 'review',
+        description: 'awaiting verification',
+        ownerId: SessionId('author'),
+        blockedBy: [],
+        writeScopes: [],
+      }
+      session.append('team/task', { version: 1, teamId, task: { ...task, revision: 1, status: 'pending' } })
+      session.append('team/task', { version: 1, teamId, task: { ...task, revision: 2, status: 'in_progress' } })
       session.append('team/task', {
         version: 1,
-        teamId: TeamId(session.id),
-        task: {
-          id: TeamTaskId('task-1'),
-          revision: 1,
-          subject: 'review',
-          description: 'awaiting verification',
-          status: 'in_review',
-          ownerId: SessionId('author'),
-          blockedBy: [],
-          writeScopes: [],
-          receipt,
-        },
+        teamId,
+        task: { ...task, revision: 3, status: 'in_review', receipt },
       })
     }).not.toThrow()
-    expect(session.events[0]?.data).toMatchObject({ task: { status: 'in_review', receipt } })
+    expect(session.events[2]?.data).toMatchObject({ task: { status: 'in_review', receipt } })
   })
 })

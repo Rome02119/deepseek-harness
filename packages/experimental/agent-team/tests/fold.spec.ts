@@ -9,7 +9,12 @@ import {
 } from '../src/fold.ts'
 import type { TeamFoldState } from '../src/fold.ts'
 import { TeamId, TeamMessageId, TeamTaskId } from '../src/types.ts'
-import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskSnapshot } from '../src/types.ts'
+import type {
+  TeamMemberSnapshot,
+  TeamMessageSnapshot,
+  TeamTaskReceipt,
+  TeamTaskSnapshot,
+} from '../src/types.ts'
 
 const ROOT = SessionId('team-root')
 const TEAM = TeamId(ROOT)
@@ -53,6 +58,38 @@ function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
     writeScopes: [],
     ...overrides,
   }
+}
+
+function receipt(overrides: Partial<TeamTaskReceipt> = {}): TeamTaskReceipt {
+  return {
+    verifierId: CHILD,
+    verifierName: 'worker-a',
+    command: 'pnpm test',
+    exitCode: 0,
+    gitSha: '0123456789abcdef',
+    branch: 'feature',
+    dirty: false,
+    outputDigest: 'sha256:verified',
+    workerProvider: 'spawn',
+    verifierProvider: 'detached',
+    ...overrides,
+  }
+}
+
+function taskReviewHistory(): SessionEvent[] {
+  return [
+    event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+    event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 2, status: 'in_progress', ownerId: ROOT }),
+    }, 1),
+    event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 3, status: 'in_review', ownerId: ROOT }),
+    }, 2),
+  ]
 }
 
 function message(overrides: Partial<TeamMessageSnapshot> = {}): TeamMessageSnapshot {
@@ -137,22 +174,63 @@ describe('Agent Teams fold', () => {
   })
 
   it('accepts an in-review task with a verification receipt', () => {
-    const receipt = {
-      verifierId: CHILD,
-      verifierName: 'worker-a',
-      command: 'pnpm test',
-      exitCode: 0,
-      gitSha: '0123456789abcdef',
-      branch: 'feature',
-      dirty: false,
-      outputDigest: 'sha256:verified',
-    }
-    const state = foldTeam(ROOT, [event('team/task', {
+    const verification = receipt()
+    const records = taskReviewHistory()
+    records[2] = event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ status: 'in_review', receipt }),
-    }, 0)])
-    expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'in_review', receipt })
+      task: task({ revision: 3, status: 'in_review', ownerId: ROOT, receipt: verification }),
+    }, 2)
+    const state = foldTeam(ROOT, records)
+    expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'in_review', receipt: verification })
+  })
+
+  it('rejects a forged completed task without a receipt', () => {
+    expect(() => foldTeam(ROOT, [event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ status: 'completed' }),
+    }, 0)])).toThrow(/invalid new -> completed transition/)
+
+    expect(() => foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'completed', ownerId: ROOT }),
+    }, 3)])).toThrow(/completed without a receipt/)
+  })
+
+  it.each([
+    ['a non-zero exit code', receipt({ exitCode: 1 }), /failing receipt/],
+    ['a dirty tree', receipt({ dirty: true }), /dirty receipt/],
+    ['the task owner as verifier', receipt({ verifierId: ROOT }), /verified by its owner/],
+    ['the worker provider as verifier', receipt({ verifierProvider: 'spawn' }), /worker provider/],
+  ])('rejects a completed task receipt with %s', (_case, verification, expected) => {
+    expect(() => foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
+    }, 3)])).toThrow(expected)
+  })
+
+  it('rejects an illegal pending -> completed task transition', () => {
+    expect(() => foldTeam(ROOT, [
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'completed', ownerId: ROOT, receipt: receipt() }),
+      }, 1),
+    ])).toThrow(/invalid pending -> completed transition/)
+  })
+
+  it('folds the legitimate review and verified completion sequence', () => {
+    const verification = receipt()
+    const state = foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
+    }, 3)])
+    expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
   })
 
   it('rejects every invalid persisted task dependency relation', () => {

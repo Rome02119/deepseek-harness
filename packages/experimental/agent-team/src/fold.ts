@@ -11,6 +11,7 @@ import type {
   TeamMessageSnapshot,
   TeamTaskId,
   TeamTaskSnapshot,
+  TeamTaskStatus,
 } from './types.ts'
 import {
   TeamId as toTeamId,
@@ -29,6 +30,13 @@ const teamTaskIdSchema = z.string().min(1).refine((value) => {
   return match === null || Number.isSafeInteger(Number(match[1]))
 }, { message: 'numeric task id suffix must be a safe integer' }).transform(value => toTeamTaskId(value))
 const teamMessageIdSchema = z.string().min(1).transform(value => toTeamMessageId(value))
+const teamTaskTransitions: Record<TeamTaskStatus, readonly TeamTaskStatus[]> = {
+  pending: ['pending', 'in_progress', 'deleted'],
+  in_progress: ['in_progress', 'in_review', 'pending', 'deleted'],
+  in_review: ['in_review', 'completed', 'pending', 'deleted'],
+  completed: ['completed', 'pending', 'deleted'],
+  deleted: [],
+}
 
 const coreContentBlockTypes = new Set(['text', 'reasoning', 'image', 'tool-call', 'tool-result'])
 const imageAttachmentSchema = z.object({
@@ -259,6 +267,20 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
       }
       if (prior !== undefined && task.revision !== prior.revision + 1) {
         throw new Error(`team task "${task.id}" revision is not contiguous`)
+      }
+      const priorStatus = prior?.status
+      if (priorStatus === undefined ? task.status !== 'pending' : !teamTaskTransitions[priorStatus].includes(task.status)) {
+        throw new Error(`team task "${task.id}" has an invalid ${priorStatus ?? 'new'} -> ${task.status} transition`)
+      }
+      if (task.status === 'completed') {
+        const receipt = task.receipt
+        if (receipt === undefined) throw new Error(`team task "${task.id}" completed without a receipt`)
+        if (receipt.exitCode !== 0) throw new Error(`team task "${task.id}" completed with a failing receipt`)
+        if (receipt.dirty) throw new Error(`team task "${task.id}" completed with a dirty receipt`)
+        if (receipt.verifierId === task.ownerId) throw new Error(`team task "${task.id}" was verified by its owner`)
+        if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
+          throw new Error(`team task "${task.id}" was verified by its worker provider`)
+        }
       }
       assertTaskGraphCandidate(state.tasks, task)
       const match = numericTaskIdPattern.exec(task.id)
