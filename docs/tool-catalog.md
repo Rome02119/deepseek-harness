@@ -1900,7 +1900,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_list`
 
-List shared tasks, including readiness, owner, revision, blockers, and write-scope warnings.
+List shared tasks, including readiness, owner, lease, verification counters, revision, blockers, and write-scope warnings.
 
 ```json
 {
@@ -1913,6 +1913,7 @@ List shared tasks, including readiness, owner, revision, blockers, and write-sco
         "pending",
         "in_progress",
         "in_review",
+        "blocked",
         "completed"
       ]
     },
@@ -1959,6 +1960,7 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
       "description": "Task transition to apply.",
       "enum": [
         "claim",
+        "renew",
         "release",
         "edit",
         "set_dependencies",
@@ -1966,6 +1968,7 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
         "verify",
         "reopen",
         "reassign",
+        "unblock",
         "delete"
       ]
     },
@@ -1994,6 +1997,10 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     "owner": {
       "type": "string",
       "description": "Member name for Lead-only reassign; omit to unassign."
+    },
+    "error_sig": {
+      "type": "string",
+      "description": "Failure signature used by verify to detect repeated errors."
     },
     "receipt": {
       "type": "object",

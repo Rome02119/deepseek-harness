@@ -68,7 +68,7 @@ export interface TeamMemberView {
 }
 
 /** Durable task lifecycle. */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'completed' | 'deleted'
+export type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'blocked' | 'completed' | 'deleted'
 
 /** Durable proof that a non-author ran a gate command against a named commit. */
 export interface TeamTaskReceipt {
@@ -92,6 +92,10 @@ export interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  readonly leaseExpiresAt?: number
+  readonly attempts: number
+  readonly lastErrorSig?: string
+  readonly stagnation: number
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly receipt?: TeamTaskReceipt
@@ -104,6 +108,10 @@ export interface TeamTaskView {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
+  readonly leaseExpiresAt?: number
+  readonly leaseExpired: boolean
+  readonly attempts: number
+  readonly stagnation: number
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly receipt?: TeamTaskReceipt
@@ -143,6 +151,8 @@ export interface Config {
   readonly maxMembers?: number
   /** Maximum non-deleted tasks retained by one Team. */
   readonly maxTasks?: number
+  /** Lease duration assigned by task claim and renewal operations. */
+  readonly leaseDurationMs?: number
   /** Maximum queued-minus-delivered messages for one target member. */
   readonly maxPendingMessagesPerMember?: number
   /** Maximum UTF-8 bytes in one complete sender-framed delivery. */
@@ -191,6 +201,7 @@ export interface CreateTeamTaskRequest {
 /** Supported task mutation actions. */
 export type TeamTaskAction =
   | 'claim'
+  | 'renew'
   | 'release'
   | 'edit'
   | 'set_dependencies'
@@ -198,6 +209,7 @@ export type TeamTaskAction =
   | 'verify'
   | 'reopen'
   | 'reassign'
+  | 'unblock'
   | 'delete'
 
 /** Compare-and-set mutation of one shared task. */
@@ -210,6 +222,7 @@ export interface UpdateTeamTaskRequest {
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
   readonly owner?: string
+  readonly errorSig?: string
   readonly receipt?: TeamTaskReceipt
 }
 

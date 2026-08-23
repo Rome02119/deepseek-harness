@@ -608,6 +608,8 @@ export interface Config {
   readonly maxMembers?: number
   /** Maximum non-deleted tasks retained by one Team. */
   readonly maxTasks?: number
+  /** Lease duration assigned by task claim and renewal operations. */
+  readonly leaseDurationMs?: number
   /** Maximum queued-minus-delivered messages for one target member. */
   readonly maxPendingMessagesPerMember?: number
   /** Maximum UTF-8 bytes in one complete sender-framed delivery. */
@@ -617,7 +619,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/experimental/agent-team/src/types.ts:141`](../packages/experimental/agent-team/src/types.ts)
+来源：[`packages/experimental/agent-team/src/types.ts:149`](../packages/experimental/agent-team/src/types.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 

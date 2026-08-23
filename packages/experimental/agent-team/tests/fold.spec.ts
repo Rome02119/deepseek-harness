@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionEventMap, SessionEventType } from '@deepseek-ai/dsh-session'
 import {
@@ -64,6 +64,8 @@ function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
     subject: 'subject',
     description: 'description',
     status: 'pending',
+    attempts: 0,
+    stagnation: 0,
     blockedBy: [],
     writeScopes: [],
     ...overrides,
@@ -271,6 +273,69 @@ describe('Agent Teams fold', () => {
       task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
     }, 5)])
     expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
+  })
+
+  it('enforces verification blocking through the shared failure-cap predicate', () => {
+    const failing = receipt({ exitCode: 1 })
+    const review = taskReviewHistory()
+    expect(() => foldTeam(ROOT, [...review, event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'blocked', attempts: 2, stagnation: 2, receipt: failing }),
+    }, 3)])).toThrow(/blocked below the verification failure cap/)
+    expect(() => foldTeam(ROOT, [...review, event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'pending', attempts: 5, stagnation: 1, receipt: failing }),
+    }, 3)])).toThrow(/remained pending at the verification failure cap/)
+
+    const blocked = event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'blocked', attempts: 3, stagnation: 3, receipt: failing }),
+    }, 3)
+    const unblocked = event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 5, status: 'pending', receipt: failing }),
+    }, 4)
+    expect(() => foldTeam(ROOT, [...review, blocked, event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 5, status: 'pending', attempts: 3, stagnation: 3, receipt: failing }),
+    }, 4)])).toThrow(/unblocked without resetting ownership and failure counters/)
+    expect(foldTeam(ROOT, [...review, blocked, unblocked]).tasks.get(TeamTaskId('task-1')))
+      .toMatchObject({ status: 'pending', attempts: 0, stagnation: 0 })
+  })
+
+  it('folds past lease timestamps deterministically without consulting the clock', () => {
+    const records = [
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', ownerId: ROOT, leaseExpiresAt: 1 }),
+      }, 1),
+    ]
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => { throw new Error('fold consulted clock') })
+    const first = foldTeam(ROOT, records)
+    const second = foldTeam(ROOT, records)
+    expect([...first.tasks]).toEqual([...second.tasks])
+    expect(first.tasks.get(TeamTaskId('task-1'))?.leaseExpiresAt).toBe(1)
+    clock.mockRestore()
+  })
+
+  it.each([
+    ['attempts', -1],
+    ['attempts', 1.5],
+    ['stagnation', -1],
+    ['stagnation', Number.MAX_SAFE_INTEGER + 1],
+  ] as const)('rejects invalid persisted task %s', (field, value) => {
+    expect(() => foldTeam(ROOT, [event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ [field]: value }),
+    }, 0)])).toThrow(/persisted Agent Teams team\/task payload is invalid/)
   })
 
   it('rejects every invalid persisted task dependency relation', () => {

@@ -40,6 +40,7 @@ declare module '@deepseek-ai/cordis' {
 
 const DEFAULT_MAX_MEMBERS = 8
 const DEFAULT_MAX_TASKS = 256
+const DEFAULT_LEASE_DURATION_MS = 15 * 60 * 1_000
 const DEFAULT_MAX_PENDING_MESSAGES = 64
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
@@ -59,6 +60,7 @@ export class TeamService extends Service {
   static Config: z<Config> = z.object({
     maxMembers: z.number().step(1).min(1).default(DEFAULT_MAX_MEMBERS),
     maxTasks: z.number().step(1).min(1).default(DEFAULT_MAX_TASKS),
+    leaseDurationMs: z.number().step(1).min(1).default(DEFAULT_LEASE_DURATION_MS),
     maxPendingMessagesPerMember: z.number().step(1).min(1).default(DEFAULT_MAX_PENDING_MESSAGES),
     maxMessageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_BYTES),
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
@@ -79,6 +81,10 @@ export class TeamService extends Service {
     this.config = {
       maxMembers: positiveLimit('maxMembers', config.maxMembers ?? DEFAULT_MAX_MEMBERS),
       maxTasks: positiveLimit('maxTasks', config.maxTasks ?? DEFAULT_MAX_TASKS),
+      leaseDurationMs: positiveLimit(
+        'leaseDurationMs',
+        config.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS,
+      ),
       maxPendingMessagesPerMember: positiveLimit(
         'maxPendingMessagesPerMember',
         config.maxPendingMessagesPerMember ?? DEFAULT_MAX_PENDING_MESSAGES,
@@ -102,7 +108,7 @@ export class TeamService extends Service {
       this.config.maxPendingMessagesPerMember,
       this.config.maxMessageBytes,
     )
-    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks)
+    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks, this.config.leaseDurationMs)
 
     ctx.on('session/event', (session, event) => { this.mailbox.observeSessionEvent(session, event) })
     ctx.on('agent/session-start', ({ agent }) => { this.scheduleRecovery(agent) })

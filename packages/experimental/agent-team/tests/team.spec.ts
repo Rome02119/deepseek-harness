@@ -140,6 +140,7 @@ describe('Team identity and provisioning', () => {
     const fields = [
       'maxMembers',
       'maxTasks',
+      'leaseDurationMs',
       'maxPendingMessagesPerMember',
       'maxMessageBytes',
       'disposalTimeoutMs',
@@ -540,6 +541,8 @@ describe('Team shared task DAG', () => {
         subject: 'last numeric task',
         description: 'occupies the final safe numeric task id',
         status: 'pending',
+        attempts: 0,
+        stagnation: 0,
         blockedBy: [],
         writeScopes: [],
       },
@@ -652,6 +655,125 @@ describe('Team shared task DAG', () => {
     ctx.agentTeams.interrupt(lead, 'alpha')
     ctx.agentTeams.interrupt(lead, 'beta')
     await Promise.all([waitNoAgent(ctx, alpha.id), waitNoAgent(ctx, beta.id)])
+  })
+
+  it('leases claims, renews only for the owner, and permits reclaim only after expiry', async () => {
+    const { ctx, lead } = await setup(['hang'], { leaseDurationMs: 1_000 })
+    const owner = await waitRunning(ctx, (await spawn(ctx, lead, 'lease-owner')).member.id)
+    const task = await ctx.agentTeams.createTask(owner, { subject: 'leased', description: 'leased work' })
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+
+    const claimed = await ctx.agentTeams.updateTask(owner, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    expect(claimed).toMatchObject({
+      status: 'in_progress', ownerName: 'lease-owner', leaseExpiresAt: 11_000, leaseExpired: false,
+    })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'renew',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_NOT_OWNER' })
+
+    vi.setSystemTime(10_500)
+    const renewed = await ctx.agentTeams.updateTask(owner, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'renew',
+    })
+    expect(renewed.leaseExpiresAt).toBe(11_500)
+    vi.setSystemTime(11_499)
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: renewed.revision, action: 'claim',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_ALREADY_CLAIMED' })
+
+    vi.setSystemTime(11_501)
+    expect(ctx.agentTeams.getTask(lead, task.id).leaseExpired).toBe(true)
+    const reclaimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: renewed.revision, action: 'claim',
+    })
+    expect(reclaimed).toMatchObject({
+      status: 'in_progress', ownerName: 'lead', leaseExpiresAt: 12_501, leaseExpired: false,
+    })
+
+    vi.useRealTimers()
+    ctx.agentTeams.interrupt(lead, 'lease-owner')
+    await waitNoAgent(ctx, owner.id)
+  })
+
+  it('blocks five failed verifications until the Lead resets the task', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'cap-verifier')).member.id)
+    let current = await ctx.agentTeams.createTask(lead, { subject: 'cap', description: 'attempt cap' })
+    const dependent = await ctx.agentTeams.createTask(lead, {
+      subject: 'dependent', description: 'waits for cap task', blockedBy: [current.id],
+    })
+
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      const claimed = await ctx.agentTeams.updateTask(lead, {
+        taskId: current.id, expectedRevision: current.revision, action: 'claim',
+      })
+      const reviewed = await ctx.agentTeams.updateTask(lead, {
+        taskId: current.id, expectedRevision: claimed.revision, action: 'complete',
+      })
+      current = await ctx.agentTeams.updateTask(verifier, {
+        taskId: current.id,
+        expectedRevision: reviewed.revision,
+        action: 'verify',
+        errorSig: `failure-${attempt}`,
+        receipt: receipt(verifier, 'cap-verifier', { exitCode: 1 }),
+      })
+    }
+
+    expect(current).toMatchObject({ status: 'blocked', attempts: 5, stagnation: 1, ready: false })
+    expect(current.ownerName).toBeUndefined()
+    expect(ctx.agentTeams.getTask(lead, dependent.id).ready).toBe(false)
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: current.id,
+      expectedRevision: current.revision,
+      action: 'verify',
+      errorSig: 'failure-6',
+      receipt: receipt(verifier, 'cap-verifier', { exitCode: 1 }),
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: current.id, expectedRevision: current.revision, action: 'claim',
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_BLOCKED' })
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: current.id, expectedRevision: current.revision, action: 'unblock',
+    })).rejects.toMatchObject({ code: 'TEAM_LEAD_REQUIRED' })
+
+    const unblocked = await ctx.agentTeams.updateTask(lead, {
+      taskId: current.id, expectedRevision: current.revision, action: 'unblock',
+    })
+    expect(unblocked).toMatchObject({ status: 'pending', attempts: 0, stagnation: 0, ready: true })
+    expect(unblocked.ownerName).toBeUndefined()
+
+    ctx.agentTeams.interrupt(lead, 'cap-verifier')
+    await waitNoAgent(ctx, verifier.id)
+  })
+
+  it('blocks three consecutive failure signatures and resets stagnation when the signature changes', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'sig-verifier')).member.id)
+    let current = await ctx.agentTeams.createTask(lead, { subject: 'sig', description: 'signature cap' })
+
+    for (const [index, errorSig] of ['first', 'second', 'second', 'second'].entries()) {
+      const claimed = await ctx.agentTeams.updateTask(lead, {
+        taskId: current.id, expectedRevision: current.revision, action: 'claim',
+      })
+      const reviewed = await ctx.agentTeams.updateTask(lead, {
+        taskId: current.id, expectedRevision: claimed.revision, action: 'complete',
+      })
+      current = await ctx.agentTeams.updateTask(verifier, {
+        taskId: current.id,
+        expectedRevision: reviewed.revision,
+        action: 'verify',
+        errorSig,
+        receipt: receipt(verifier, 'sig-verifier', { exitCode: 1 }),
+      })
+      expect(current.stagnation).toBe(index === 0 ? 1 : index)
+    }
+
+    expect(current).toMatchObject({ status: 'blocked', attempts: 4, stagnation: 3 })
+    ctx.agentTeams.interrupt(lead, 'sig-verifier')
+    await waitNoAgent(ctx, verifier.id)
   })
 
   it('rejects invalid verification and records a failed clean gate for retry', async () => {

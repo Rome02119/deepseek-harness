@@ -12,12 +12,13 @@
   config:
     maxMembers: 8
     maxTasks: 256
+    leaseDurationMs: 900000
     maxPendingMessagesPerMember: 64
     maxMessageBytes: 65536
     disposalTimeoutMs: 5000
 ```
 
-每个限制都必须是正的安全整数。`maxMembers` 统计所有曾 provision 的名字，包括失败成员，因为名字永不复用。`maxTasks` 统计未删除任务。mailbox 限额按目标成员计算；字节限制覆盖完整的投递帧，包括稳定 id 与发送者名称。`disposalTimeoutMs` 限制已获准创建、mailbox dispatch 与 Team 自有 Activation 的 settlement 时长，使插件 reload 与进程 shutdown 在异常时明确失败，而不是无限等待。
+每个限制都必须是正的安全整数。`maxMembers` 统计所有曾 provision 的名字，包括失败成员，因为名字永不复用。`maxTasks` 统计未删除任务。`leaseDurationMs` 将任务 claim 与 renew 的默认租期设为 15 分钟。mailbox 限额按目标成员计算；字节限制覆盖完整的投递帧，包括稳定 id 与发送者名称。`disposalTimeoutMs` 限制已获准创建、mailbox dispatch 与 Team 自有 Activation 的 settlement 时长，使插件 reload 与进程 shutdown 在异常时明确失败，而不是无限等待。
 
 该服务要求 Agent、Session、Session persistence 与 continuable-subagent 服务。没有持久 Session 存储的组合不会激活它。
 
@@ -41,9 +42,11 @@ roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idl
 
 ## 共享任务板
 
-任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
+任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。claim 会记录绝对时间 `leaseExpiresAt`；只有 owner 可以 renew，租期过期后任意成员都可以 reclaim in-progress 任务。view 根据当前时钟派生 `leaseExpired`，回放只携带已记录的时间戳，绝不会仅因时间流逝而改变任务 status 或 owner。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
 
 依赖必须指向当前未删除任务，并组成完整 DAG，不允许 self edge 或重复 edge。只有所有 blocker 都 completed，pending 任务才 ready。仍被未删除任务依赖的任务不能删除。删除任务作为 tombstone 保留以供回放和维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。
+
+verification 失败会增加 `attempts`，并通过 `stagnation` 统计连续相同的 `errorSig`。失败五次或连续三次签名相同会把任务转为无 owner 的 `blocked`；blocked 任务不能被 claim，也不能满足 dependent。只有 Lead 可以执行 `unblock`，将任务恢复为 pending 并把两个计数器归零。
 
 `writeScopes` 会规范化为 workspace-relative 路径前缀。view 会对与 in-progress 任务的重叠发出警告，但绝不会阻止 claim 或授予文件写权限。它们是协作提示，不是锁。
 
@@ -72,5 +75,5 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 - **单进程、共享 checkout**：所有成员共享 cwd，修改立即可见；本包不提供 worktree、远端成员、自动 merge 或文件锁。
 - **write scope 仅作提示**：Bash、formatter、codegen 和直接外部写入可以绕过文件版本检查；Lead 必须协调 owner 并检查最终 diff。
 - **扁平且不可变的 roster**：只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
-- **不会自动释放 owner**：idle、interrupt、进程退出与工作失败都不会释放任务 owner。
+- **租期到期后仍需 claimant**：timer 不会改变持久状态；其他成员观察到 `leaseExpired` 后必须追加 reclaim。
 - **mailbox 不保证跨进程 exactly-once**：不支持多个 harness 进程并发操作同一 Team。

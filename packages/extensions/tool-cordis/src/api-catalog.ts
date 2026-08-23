@@ -4627,7 +4627,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TeamTaskAction',
-    declaration: 'export type TeamTaskAction = \'claim\' | \'release\' | \'edit\' | \'set_dependencies\' | \'complete\' | \'verify\' | \'reopen\' | \'reassign\' | \'delete\';',
+    declaration: 'export type TeamTaskAction = \'claim\' | \'renew\' | \'release\' | \'edit\' | \'set_dependencies\' | \'complete\' | \'verify\' | \'reopen\' | \'reassign\' | \'unblock\' | \'delete\';',
   },
   {
     name: 'TeamTaskId',
@@ -4639,11 +4639,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TeamTaskStatus',
-    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'in_review\' | \'completed\' | \'deleted\';',
+    declaration: 'export type TeamTaskStatus = \'pending\' | \'in_progress\' | \'in_review\' | \'blocked\' | \'completed\' | \'deleted\';',
   },
   {
     name: 'TeamTaskView',
-    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly receipt?: TeamTaskReceipt;\n    readonly ownerName?: string;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
+    declaration: 'export interface TeamTaskView {\n    readonly id: TeamTaskId;\n    readonly revision: number;\n    readonly subject: string;\n    readonly description: string;\n    readonly status: TeamTaskStatus;\n    readonly leaseExpiresAt?: number;\n    readonly leaseExpired: boolean;\n    readonly attempts: number;\n    readonly stagnation: number;\n    readonly blockedBy: TeamTaskId[];\n    readonly writeScopes: string[];\n    readonly receipt?: TeamTaskReceipt;\n    readonly ownerName?: string;\n    readonly ready: boolean;\n    readonly writeScopeWarnings: string[];\n}',
   },
   {
     name: 'TeamWaitResult',
@@ -4931,7 +4931,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'UpdateTeamTaskRequest',
-    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n    readonly receipt?: TeamTaskReceipt;\n}',
+    declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n    readonly errorSig?: string;\n    readonly receipt?: TeamTaskReceipt;\n}',
   },
   {
     name: 'UserMessage',

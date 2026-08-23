@@ -1906,7 +1906,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 
 ### `team_task_list`
 
-列出共享任务，包括 readiness、owner、revision、blocker 与 write-scope warning。
+列出共享任务，包括 readiness、owner、租期、verification 计数器、revision、blocker 与 write-scope warning。
 
 ```json
 {
@@ -1919,6 +1919,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
         "pending",
         "in_progress",
         "in_review",
+        "blocked",
         "completed"
       ]
     },
@@ -1965,6 +1966,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
       "description": "Task transition to apply.",
       "enum": [
         "claim",
+        "renew",
         "release",
         "edit",
         "set_dependencies",
@@ -1972,6 +1974,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
         "verify",
         "reopen",
         "reassign",
+        "unblock",
         "delete"
       ]
     },
@@ -2000,6 +2003,10 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
     "owner": {
       "type": "string",
       "description": "Member name for Lead-only reassign; omit to unassign."
+    },
+    "error_sig": {
+      "type": "string",
+      "description": "Failure signature used by verify to detect repeated errors."
     },
     "receipt": {
       "type": "object",

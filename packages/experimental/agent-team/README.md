@@ -12,12 +12,13 @@ Implicit-root Agent Teams domain. `ctx.agentTeams` owns a flat Lead/teammate ros
   config:
     maxMembers: 8
     maxTasks: 256
+    leaseDurationMs: 900000
     maxPendingMessagesPerMember: 64
     maxMessageBytes: 65536
     disposalTimeoutMs: 5000
 ```
 
-Every limit must be a positive safe integer. `maxMembers` counts every name ever provisioned, including failed members, because names are never reusable. `maxTasks` counts non-deleted tasks. The mailbox limit is per target; the byte limit covers the complete framed delivery, including its stable id and sender name. `disposalTimeoutMs` bounds admitted creation, mailbox dispatch, and Team-owned Activation settlement so plugin reload and process shutdown fail visibly instead of waiting forever.
+Every limit must be a positive safe integer. `maxMembers` counts every name ever provisioned, including failed members, because names are never reusable. `maxTasks` counts non-deleted tasks. `leaseDurationMs` defaults task claims and renewals to 15 minutes. The mailbox limit is per target; the byte limit covers the complete framed delivery, including its stable id and sender name. `disposalTimeoutMs` bounds admitted creation, mailbox dispatch, and Team-owned Activation settlement so plugin reload and process shutdown fail visibly instead of waiting forever.
 
 The service requires Agent, Session, Session persistence, and continuable-subagent services. A composition without durable Session storage does not activate it.
 
@@ -41,9 +42,11 @@ The guarantee is process-local retry plus target-Session de-duplication, not cro
 
 ## Shared task board
 
-Tasks are complete versioned snapshots. Every mutation carries `expectedRevision`; stale callers receive `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Any member can create, read, or claim a ready unowned task. The owner or Lead can edit, release, complete, reopen, or delete it; only the Lead can assign another member. Numeric `task-<n>` ids require a safe-integer suffix; creation reports `TEAM_TASK_LIMIT` instead of reusing the final safe id.
+Tasks are complete versioned snapshots. Every mutation carries `expectedRevision`; stale callers receive `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Any member can create, read, or claim a ready unowned task. A claim records an absolute `leaseExpiresAt`; only the owner can renew it, and any member can reclaim an in-progress task after its lease expires. Views derive `leaseExpired` from the current clock, while replay only carries the recorded timestamp and never changes task status or ownership from time alone. The owner or Lead can edit, release, complete, reopen, or delete a task; only the Lead can assign another member. Numeric `task-<n>` ids require a safe-integer suffix; creation reports `TEAM_TASK_LIMIT` instead of reusing the final safe id.
 
 Dependencies must name current non-deleted tasks and form a complete DAG with no self or duplicate edge. A pending task is ready only after every blocker completes. Deleting a task that still has a non-deleted dependent is rejected. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`.
+
+A failed verification increments `attempts` and tracks consecutive identical `errorSig` values in `stagnation`. Five failures or three consecutive matching signatures move the task to unowned `blocked`; blocked tasks cannot be claimed or satisfy dependents. Only the Lead can `unblock` a task, which returns it to pending and resets both counters.
 
 `writeScopes` are normalized workspace-relative prefixes. Views warn when they overlap an in-progress task, but they never block claim or authorize filesystem writes. They are coordination hints, not locks.
 
@@ -72,5 +75,5 @@ Peer messages append after the target's reusable history prefix. Cold resume reu
 - **One process and one shared checkout** — members share cwd and observe edits immediately; this package provides no worktree, remote member, merge, or filesystem lock.
 - **Advisory write scopes** — Bash, formatters, code generators, and direct external writers can bypass filesystem version checks; Leads must coordinate ownership and review the final diff.
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
-- **No automatic ownership release** — idle, interruption, process exit, and failed work do not release a task owner.
+- **Lease expiry requires a claimant** — no timer mutates durable state; another member must append a reclaim after observing `leaseExpired`.
 - **Mailbox is not cross-process exactly-once** — concurrent harness processes over one Team are unsupported.

@@ -57,6 +57,8 @@ describe('Agent Teams stream invariant', () => {
           subject: 'invalid dependency',
           description: 'references a missing blocker',
           status: 'pending',
+          attempts: 0,
+          stagnation: 0,
           blockedBy: [TeamTaskId('missing')],
           writeScopes: [],
         },
@@ -89,6 +91,8 @@ describe('Agent Teams stream invariant', () => {
         subject: 'review',
         description: 'awaiting verification',
         ownerId: SessionId('author'),
+        attempts: 0,
+        stagnation: 0,
         blockedBy: [],
         writeScopes: [],
       }

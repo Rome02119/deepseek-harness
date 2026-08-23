@@ -33,7 +33,8 @@ const teamMessageIdSchema = z.string().min(1).transform(value => toTeamMessageId
 const teamTaskTransitions: Record<TeamTaskStatus, readonly TeamTaskStatus[]> = {
   pending: ['pending', 'in_progress', 'deleted'],
   in_progress: ['in_progress', 'in_review', 'pending', 'deleted'],
-  in_review: ['in_review', 'completed', 'pending', 'deleted'],
+  in_review: ['in_review', 'completed', 'pending', 'blocked', 'deleted'],
+  blocked: ['pending', 'deleted'],
   completed: ['completed', 'pending', 'deleted'],
   deleted: [],
 }
@@ -100,8 +101,12 @@ const teamTaskSnapshotSchema = z.object({
   revision: positiveSafeInteger,
   subject: z.string(),
   description: z.string(),
-  status: z.enum(['pending', 'in_progress', 'in_review', 'completed', 'deleted']),
+  status: z.enum(['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted']),
   ownerId: sessionIdSchema.optional(),
+  leaseExpiresAt: positiveSafeInteger.optional(),
+  attempts: nonNegativeSafeInteger.default(0),
+  lastErrorSig: z.string().optional(),
+  stagnation: nonNegativeSafeInteger.default(0),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
   receipt: teamTaskReceiptSchema.optional(),
@@ -182,6 +187,17 @@ export function emptyTeamFoldState(rootId: SessionId): TeamFoldState {
  */
 export function isActiveTeamMember(state: TeamFoldState, memberId: SessionId): boolean {
   return state.id === toTeamId(memberId) || state.members.get(memberId)?.phase === 'active'
+}
+
+/**
+ * Whether durable verification failure counters require a blocked task.
+ * @param task - current failed-verification counters.
+ * @returns whether either automatic blocking cap has been reached.
+ */
+export function isTaskVerificationBlocked(
+  task: Pick<TeamTaskSnapshot, 'attempts' | 'stagnation'>,
+): boolean {
+  return task.attempts >= 5 || task.stagnation >= 3
 }
 
 /** Whether one event belongs to the Team domain. */
@@ -281,6 +297,24 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
       const priorStatus = prior?.status
       if (priorStatus === undefined ? task.status !== 'pending' : !teamTaskTransitions[priorStatus].includes(task.status)) {
         throw new Error(`team task "${task.id}" has an invalid ${priorStatus ?? 'new'} -> ${task.status} transition`)
+      }
+      if (task.status === 'blocked') {
+        if (!isTaskVerificationBlocked(task)) {
+          throw new Error(`team task "${task.id}" blocked below the verification failure cap`)
+        }
+        if (task.ownerId !== undefined) throw new Error(`team task "${task.id}" blocked with an owner`)
+        if (task.receipt === undefined || task.receipt.exitCode === 0) {
+          throw new Error(`team task "${task.id}" blocked without a failing receipt`)
+        }
+      }
+      if (priorStatus === 'in_review' && task.status === 'pending'
+        && task.receipt?.exitCode !== undefined && task.receipt.exitCode !== 0
+        && isTaskVerificationBlocked(task)) {
+        throw new Error(`team task "${task.id}" remained pending at the verification failure cap`)
+      }
+      if (priorStatus === 'blocked' && task.status === 'pending'
+        && (task.ownerId !== undefined || task.attempts !== 0 || task.stagnation !== 0)) {
+        throw new Error(`team task "${task.id}" unblocked without resetting ownership and failure counters`)
       }
       if (task.status === 'completed') {
         const receipt = task.receipt

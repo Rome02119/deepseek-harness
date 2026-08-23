@@ -3,7 +3,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { TeamMembership } from './roster.ts'
 import { TeamError } from './error.ts'
-import { isActiveTeamMember, type TeamFoldState } from './fold.ts'
+import { isActiveTeamMember, isTaskVerificationBlocked, type TeamFoldState } from './fold.ts'
 import type { TeamJournal } from './journal.ts'
 import { resolveActiveMember } from './roster.ts'
 import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
@@ -33,10 +33,12 @@ export class TeamTaskBoard {
   /**
    * @param journal - authoritative Lead-log transaction owner.
    * @param maxTasks - maximum non-deleted tasks retained by one Team.
+   * @param leaseDurationMs - milliseconds assigned to each claim or renewal.
    */
   constructor(
     private readonly journal: TeamJournal,
     private readonly maxTasks: number,
+    private readonly leaseDurationMs: number,
   ) {}
 
   /**
@@ -63,12 +65,14 @@ export class TeamTaskBoard {
         subject: requiredText(request.subject, 'subject', 200),
         description: requiredText(request.description, 'description', 16_384),
         status: 'pending',
+        attempts: 0,
+        stagnation: 0,
         blockedBy: this.dependencies(request.blockedBy ?? [], state),
         writeScopes: this.writeScopes(request.writeScopes ?? []),
       }
       this.assertTaskGraph(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 1, teamId: TeamId(root.id), task })
-      return this.taskView(root, state, task)
+      return this.taskView(root, state, task, Date.now())
     })
   }
 
@@ -83,7 +87,7 @@ export class TeamTaskBoard {
     const state = this.journal.state(root)
     const task = state.tasks.get(id)
     if (task === undefined) throw new TeamError(`team task "${id}" not found`, 'TEAM_TASK_NOT_FOUND')
-    return this.taskView(root, state, task)
+    return this.taskView(root, state, task, Date.now())
   }
 
   /**
@@ -94,9 +98,10 @@ export class TeamTaskBoard {
   list(membership: TeamMembership): TeamTaskView[] {
     const { root } = membership
     const state = this.journal.state(root)
+    const now = Date.now()
     return [...state.tasks.values()]
       .filter(task => task.status !== 'deleted')
-      .map(task => this.taskView(root, state, task))
+      .map(task => this.taskView(root, state, task, now))
   }
 
   /**
@@ -113,6 +118,7 @@ export class TeamTaskBoard {
   ): Promise<TeamTaskView> {
     const root = membership.root
     return this.journal.transact(root.id, async () => {
+      const now = Date.now()
       const state = this.journal.state(root)
       const current = state.tasks.get(request.taskId)
       if (current === undefined) throw new TeamError(`team task "${request.taskId}" not found`, 'TEAM_TASK_NOT_FOUND')
@@ -129,15 +135,27 @@ export class TeamTaskBoard {
         if (!lead && !owner) throw new TeamError('task mutation requires its owner or Team Lead', 'TEAM_TASK_UNAUTHORIZED')
       }
       let next: TeamTaskSnapshot
+      const leaseExpiresAt = Math.min(Number.MAX_SAFE_INTEGER, now + this.leaseDurationMs)
       switch (request.action) {
-        case 'claim':
-          if (current.ownerId !== undefined && current.ownerId !== caller.id) {
+        case 'claim': {
+          const reclaim = current.status === 'in_progress'
+            && current.leaseExpiresAt !== undefined
+            && now > current.leaseExpiresAt
+          if (!reclaim && current.ownerId !== undefined && current.ownerId !== caller.id) {
             throw new TeamError(`team task "${current.id}" is owned by another member`, 'TEAM_TASK_ALREADY_CLAIMED')
           }
-          if (current.status !== 'pending' || !this.taskReady(state, current)) {
+          if (!reclaim && (current.status !== 'pending' || !this.taskReady(state, current))) {
             throw new TeamError(`team task "${current.id}" is not ready to claim`, 'TEAM_TASK_BLOCKED')
           }
-          next = { ...current, status: 'in_progress', ownerId: caller.id }
+          next = { ...current, status: 'in_progress', ownerId: caller.id, leaseExpiresAt }
+          break
+        }
+        case 'renew':
+          if (current.status !== 'in_progress') {
+            throw new TeamError('only an in-progress task lease can be renewed', 'TEAM_TASK_INVALID_TRANSITION')
+          }
+          if (!owner) throw new TeamError('task lease renewal requires its owner', 'TEAM_TASK_NOT_OWNER')
+          next = { ...current, leaseExpiresAt }
           break
         case 'release':
           authorizeOwner()
@@ -166,7 +184,7 @@ export class TeamTaskBoard {
         case 'complete':
           authorizeOwner()
           if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
-          next = { ...current, status: 'in_review' }
+          next = this.withoutLease({ ...current, status: 'in_review' })
           break
         case 'verify': {
           if (!isActiveTeamMember(state, caller.id)) {
@@ -186,9 +204,25 @@ export class TeamTaskBoard {
           if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
             throw new TeamError('verifier must be a different provider than the worker', 'TEAM_SAME_PROVIDER')
           }
-          next = receipt.exitCode === 0
-            ? { ...current, status: 'completed', receipt }
-            : this.withoutOwner({ ...current, status: 'pending', receipt })
+          if (receipt.exitCode === 0) {
+            next = { ...current, status: 'completed', receipt }
+          } else {
+            const attempts = current.attempts + 1
+            const stagnation = request.errorSig === current.lastErrorSig ? current.stagnation + 1 : 1
+            const { lastErrorSig: _lastErrorSig, ...withoutLastErrorSig } = current
+            const failed: TeamTaskSnapshot = {
+              ...withoutLastErrorSig,
+              status: 'pending',
+              receipt,
+              attempts,
+              stagnation,
+              ...request.errorSig === undefined ? {} : { lastErrorSig: request.errorSig },
+            }
+            next = this.withoutOwner({
+              ...failed,
+              status: isTaskVerificationBlocked(failed) ? 'blocked' : 'pending',
+            })
+          }
           break
         }
         case 'reopen':
@@ -215,6 +249,13 @@ export class TeamTaskBoard {
           next = { ...current, status: 'in_progress', ownerId: assignee.id }
           break
         }
+        case 'unblock':
+          if (!lead) throw new TeamError('only the Team Lead can unblock tasks', 'TEAM_LEAD_REQUIRED')
+          if (current.status !== 'blocked') {
+            throw new TeamError('only a blocked task can be unblocked', 'TEAM_TASK_INVALID_TRANSITION')
+          }
+          next = this.withoutOwner({ ...current, status: 'pending', attempts: 0, stagnation: 0 })
+          break
         case 'delete': {
           authorizeOwner()
           const dependent = [...state.tasks.values()].find(task =>
@@ -235,7 +276,7 @@ export class TeamTaskBoard {
       }
       this.assertTaskGraph(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 1, teamId: TeamId(root.id), task })
-      return this.taskView(root, state, task)
+      return this.taskView(root, state, task, now)
     })
   }
 
@@ -283,7 +324,13 @@ export class TeamTaskBoard {
 
   /** Remove an optional owner field under exactOptionalPropertyTypes. */
   private withoutOwner(task: TeamTaskSnapshot): TeamTaskSnapshot {
-    const { ownerId: _ownerId, ...without } = task
+    const { ownerId: _ownerId, leaseExpiresAt: _leaseExpiresAt, ...without } = task
+    return without
+  }
+
+  /** Remove an optional lease field under exactOptionalPropertyTypes. */
+  private withoutLease(task: TeamTaskSnapshot): TeamTaskSnapshot {
+    const { leaseExpiresAt: _leaseExpiresAt, ...without } = task
     return without
   }
 
@@ -293,7 +340,7 @@ export class TeamTaskBoard {
    * new value explicitly; owner names, blocker readiness, and other task scopes
    * do not change when that snapshot is appended.
    */
-  private taskView(root: Agent, state: TeamFoldState, task: TeamTaskSnapshot): TeamTaskView {
+  private taskView(root: Agent, state: TeamFoldState, task: TeamTaskSnapshot, now: number): TeamTaskView {
     const ownerName = task.ownerId === undefined
       ? undefined
       : task.ownerId === root.id
@@ -312,6 +359,10 @@ export class TeamTaskBoard {
       subject: task.subject,
       description: task.description,
       status: task.status,
+      ...task.leaseExpiresAt === undefined ? {} : { leaseExpiresAt: task.leaseExpiresAt },
+      leaseExpired: task.leaseExpiresAt !== undefined && now > task.leaseExpiresAt,
+      attempts: task.attempts,
+      stagnation: task.stagnation,
       blockedBy: structuredClone(task.blockedBy),
       writeScopes: structuredClone(task.writeScopes),
       ...task.receipt === undefined ? {} : { receipt: structuredClone(task.receipt) },

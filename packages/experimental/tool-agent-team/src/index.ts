@@ -34,7 +34,7 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use send_message for quiet information that must not start an idle teammate. Use followup_task when the target should run another turn. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, complete to submit it for review, then have another member verify it with a clean receipt. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use followup_task first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+Use send_message for quiet information that must not start an idle teammate. Use followup_task when the target should run another turn. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, renew the lease during long work, complete to submit it for review, then have another member verify it with a clean receipt. An expired in-progress lease may be reclaimed. Repeated verification failures block a task until the Lead unblocks it. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use followup_task first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use followup_task to wake each required inactive teammate before waiting again.'
@@ -86,8 +86,12 @@ const TASK_VIEW_SCHEMA = {
     revision: { type: 'integer', required: true },
     subject: { type: 'string', required: true },
     description: { type: 'string', required: true },
-    status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'in_review', 'completed', 'deleted'] },
+    status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted'] },
     ownerName: { type: 'string' },
+    leaseExpiresAt: { type: 'integer' },
+    leaseExpired: { type: 'boolean', required: true },
+    attempts: { type: 'integer', required: true },
+    stagnation: { type: 'integer', required: true },
     blockedBy: { type: 'array', required: true, items: { type: 'string' } },
     writeScopes: { type: 'array', required: true, items: { type: 'string' } },
     receipt: TASK_RECEIPT_VIEW_SCHEMA,
@@ -326,11 +330,11 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'team_task_list',
-      description: 'List shared tasks, including readiness, owner, revision, blockers, and write-scope warnings.',
+      description: 'List shared tasks, including readiness, owner, lease, verification counters, revision, blockers, and write-scope warnings.',
       parameters: {
         status: {
           type: 'string',
-          enum: ['pending', 'in_progress', 'in_review', 'completed'],
+          enum: ['pending', 'in_progress', 'in_review', 'blocked', 'completed'],
           description: 'Optional exact status filter.',
         },
         owner: { type: 'string', description: 'Optional member-name filter; use unowned for tasks without an owner.' },
@@ -380,7 +384,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         action: {
           type: 'string',
           required: true,
-          enum: ['claim', 'release', 'edit', 'set_dependencies', 'complete', 'verify', 'reopen', 'reassign', 'delete'],
+          enum: ['claim', 'renew', 'release', 'edit', 'set_dependencies', 'complete', 'verify', 'reopen', 'reassign', 'unblock', 'delete'],
           description: 'Task transition to apply.',
         },
         subject: { type: 'string', description: 'Replacement title for edit.' },
@@ -388,6 +392,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         blocked_by: { type: 'array', items: { type: 'string' }, description: 'Complete blocker list for set_dependencies.' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Replacement advisory write scopes for edit.' },
         owner: { type: 'string', description: 'Member name for Lead-only reassign; omit to unassign.' },
+        error_sig: { type: 'string', description: 'Failure signature used by verify to detect repeated errors.' },
         receipt: {
           type: 'object',
           additionalProperties: false,
@@ -416,6 +421,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
           ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },
+          ...args.error_sig === undefined ? {} : { errorSig: args.error_sig },
           ...args.receipt === undefined ? {} : {
             receipt: {
               verifierId: caller.id,
