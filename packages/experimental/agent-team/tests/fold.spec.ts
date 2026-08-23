@@ -47,6 +47,16 @@ function member(overrides: Partial<TeamMemberSnapshot> = {}): TeamMemberSnapshot
   }
 }
 
+function memberHistory(phase: TeamMemberSnapshot['phase']): SessionEvent[] {
+  const records: SessionEvent[] = [
+    event('team/member', { version: 1, teamId: TEAM, member: member() }, 0),
+  ]
+  if (phase !== 'provisioning') {
+    records.push(event('team/member', { version: 1, teamId: TEAM, member: member({ phase }) }, 1))
+  }
+  return records
+}
+
 function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
   return {
     id: TeamTaskId('task-1'),
@@ -76,19 +86,19 @@ function receipt(overrides: Partial<TeamTaskReceipt> = {}): TeamTaskReceipt {
   }
 }
 
-function taskReviewHistory(): SessionEvent[] {
+function taskReviewHistory(startSeq = 0): SessionEvent[] {
   return [
-    event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+    event('team/task', { version: 1, teamId: TEAM, task: task() }, startSeq),
     event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 2, status: 'in_progress', ownerId: ROOT }),
-    }, 1),
+    }, startSeq + 1),
     event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 3, status: 'in_review', ownerId: ROOT }),
-    }, 2),
+    }, startSeq + 2),
   ]
 }
 
@@ -212,6 +222,36 @@ describe('Agent Teams fold', () => {
     }, 3)])).toThrow(expected)
   })
 
+  it('rejects a completed task verified by an id outside the Team roster', () => {
+    const verifierId = SessionId('nobody')
+    expect(() => foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: receipt({ verifierId }) }),
+    }, 3)])).toThrow(`team task "task-1" was verified by inactive or unknown member "${verifierId}"`)
+  })
+
+  it.each(['provisioning', 'failed'] as const)(
+    'rejects a completed task verified by a %s roster member',
+    (phase) => {
+      const roster = memberHistory(phase)
+      expect(() => foldTeam(ROOT, [...roster, ...taskReviewHistory(roster.length), event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: receipt() }),
+      }, roster.length + 3)])).toThrow(`inactive or unknown member "${CHILD}"`)
+    },
+  )
+
+  it('accepts the Team Lead as verifier without a roster row', () => {
+    const state = foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2), event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ revision: 4, status: 'completed', ownerId: CHILD, receipt: receipt({ verifierId: ROOT }) }),
+    }, 5)])
+    expect(state.tasks.get(TeamTaskId('task-1'))?.status).toBe('completed')
+  })
+
   it('rejects an illegal pending -> completed task transition', () => {
     expect(() => foldTeam(ROOT, [
       event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
@@ -225,11 +265,11 @@ describe('Agent Teams fold', () => {
 
   it('folds the legitimate review and verified completion sequence', () => {
     const verification = receipt()
-    const state = foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
+    const state = foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2), event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
-    }, 3)])
+    }, 5)])
     expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
   })
 

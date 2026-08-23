@@ -721,13 +721,14 @@ describe('Team shared task DAG', () => {
       taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
     })
 
-    await ctx.agentTeams.updateTask(verifier, {
+    const completed = await ctx.agentTeams.updateTask(verifier, {
       taskId: task.id,
       expectedRevision: submitted.revision,
       action: 'verify',
       receipt: receipt(author, 'forged-author'),
     })
 
+    expect(completed.status).toBe('completed')
     expect(() => foldTeam(lead.id, lead.session.events)).not.toThrow()
     expect(durable(lead).tasks.find(candidate => candidate.id === task.id)?.receipt).toMatchObject({
       verifierId: verifier.id,
@@ -737,6 +738,44 @@ describe('Team shared task DAG', () => {
     ctx.agentTeams.interrupt(lead, 'author')
     ctx.agentTeams.interrupt(lead, 'verifier')
     await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, verifier.id)])
+  })
+
+  it('rejects a provisioning teammate before verification constructs a receipt', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'gate', description: 'gate' })
+    const claimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    const submitted = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
+    })
+    const verifierId = SessionId('provisioning-verifier')
+    lead.session.append('team/member', {
+      version: 1,
+      teamId: TeamId(lead.id),
+      member: {
+        id: verifierId,
+        name: 'provisioning-verifier',
+        description: 'not active yet',
+        provider: 'spawn',
+        context: 'fresh',
+        phase: 'provisioning',
+      },
+    })
+    const verifier = await ctx.agents.create({
+      sessionId: verifierId,
+      meta: { parentSession: lead.id },
+      agentOptions: { provider: 'mock', model: 'mock' },
+    })
+
+    await expect(ctx.agentTeams.updateTask(verifier.agent, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(verifier.agent, 'provisioning-verifier'),
+    })).rejects.toMatchObject({ code: 'TEAM_MEMBER_NOT_ACTIVE' })
+
+    await verifier.dispose()
   })
 
   it('rejects malformed scopes and every invalid dependency relation', async () => {

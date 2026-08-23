@@ -29,7 +29,7 @@
 
 fresh child 不带 parent 历史 seed。fork child 只捕获一次 Lead 的已完成 turn 前缀，不包含正在执行 delegation 的 turn。继承的 Team 记录带有旧 Root 的 `TeamId`，普通 fork 成为独立运行时 Root 后会忽略这些记录。roster 之外、由 provider 管理的 subagent 不会被误认为嵌套 Team Lead。
 
-roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idle` 状态。active 但不驻留的 teammate 显示为 `inactive`；后续 wakeup 投递会经 continuation owner 冷恢复它。
+roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idle` 状态。task verification 只允许 Lead 或 active teammate 调用；provisioning teammate 会收到 `TEAM_MEMBER_NOT_ACTIVE`。active 但不驻留的 teammate 显示为 `inactive`；后续 wakeup 投递会经 continuation owner 冷恢复它。
 
 ## 持久 mailbox
 
@@ -49,7 +49,7 @@ roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idl
 
 `waitForChange()` 可以等待注册后发生的下一条 roster、task、mailbox 或实时 status 边，时长范围为 10 秒到 1 小时；它只报告等待是否超时，也不会回放调用前已经发生的变化。运行时 dispose 会释放当前等待，并使后续等待不经超时立即返回。调用方需要在唤醒或超时后重新读取权威状态。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 以结构化检查结果报告，不再强制转成 object 字符串。`interrupt()` 仅限 Lead，并委托 continuable-subagent 的 interrupt 路径以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
 
-独立的 `./invariant` 配套模块会把每条候选 Team event 对照已提交 Session 前缀回放。回放会先验证每个当前版本 Team payload，再将其纳入折叠状态；随后会在 append 前拒绝非法 member 转换、名字复用、超出范围的数字 task id、不连续任务 revision、非法任务依赖、重复 queue／ack，以及 target 不匹配的 acknowledgement。顺序与时间由 Session event 的 `seq` 和 `time` 负责，不在 snapshot 中重复保存。
+独立的 `./invariant` 配套模块会把每条候选 Team event 对照已提交 Session 前缀回放。回放会先验证每个当前版本 Team payload，再将其纳入折叠状态；随后会在 append 前拒绝非法 member 转换、名字复用、超出范围的数字 task id、不连续任务 revision、verifier 既非 Lead 也非 active roster member 的 completed-task receipt、非法任务依赖、重复 queue／ack，以及 target 不匹配的 acknowledgement。顺序与时间由 Session event 的 `seq` 和 `time` 负责，不在 snapshot 中重复保存。
 
 ## 模型体验
 

@@ -174,6 +174,16 @@ export function emptyTeamFoldState(rootId: SessionId): TeamFoldState {
   }
 }
 
+/**
+ * Test whether an id is the Team Lead or an active durable roster member.
+ * @param state - current Team fold.
+ * @param memberId - candidate member Session id.
+ * @returns whether the id may act as an active Team member.
+ */
+export function isActiveTeamMember(state: TeamFoldState, memberId: SessionId): boolean {
+  return state.id === toTeamId(memberId) || state.members.get(memberId)?.phase === 'active'
+}
+
 /** Whether one event belongs to the Team domain. */
 export type TeamEventType =
   | 'team/member'
@@ -280,6 +290,9 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
         if (receipt.verifierId === task.ownerId) throw new Error(`team task "${task.id}" was verified by its owner`)
         if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
           throw new Error(`team task "${task.id}" was verified by its worker provider`)
+        }
+        if (!isActiveTeamMember(state, receipt.verifierId)) {
+          throw new Error(`team task "${task.id}" was verified by inactive or unknown member "${receipt.verifierId}"`)
         }
       }
       assertTaskGraphCandidate(state.tasks, task)

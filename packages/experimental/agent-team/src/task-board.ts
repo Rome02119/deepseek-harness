@@ -3,7 +3,7 @@
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { TeamMembership } from './roster.ts'
 import { TeamError } from './error.ts'
-import type { TeamFoldState } from './fold.ts'
+import { isActiveTeamMember, type TeamFoldState } from './fold.ts'
 import type { TeamJournal } from './journal.ts'
 import { resolveActiveMember } from './roster.ts'
 import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
@@ -169,6 +169,9 @@ export class TeamTaskBoard {
           next = { ...current, status: 'in_review' }
           break
         case 'verify': {
+          if (!isActiveTeamMember(state, caller.id)) {
+            throw new TeamError(`Team member "${caller.id}" is not active`, 'TEAM_MEMBER_NOT_ACTIVE')
+          }
           if (request.receipt === undefined) throw new TeamError('verify requires a receipt', 'TEAM_INVALID_ARGUMENT')
           if (current.status !== 'in_review') throw new TeamError('only an in-review task can be verified', 'TEAM_TASK_INVALID_TRANSITION')
           if (current.ownerId === caller.id) {
