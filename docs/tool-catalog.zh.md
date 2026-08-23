@@ -1918,6 +1918,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
       "enum": [
         "pending",
         "in_progress",
+        "in_review",
         "completed"
       ]
     },
@@ -1968,6 +1969,7 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
         "edit",
         "set_dependencies",
         "complete",
+        "verify",
         "reopen",
         "reassign",
         "delete"
@@ -1998,6 +2000,45 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
     "owner": {
       "type": "string",
       "description": "Member name for Lead-only reassign; omit to unassign."
+    },
+    "receipt": {
+      "type": "object",
+      "description": "Clean gate result for verify. Verifier identity comes from the calling Team member.",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "git_sha": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "output_digest": {
+          "type": "string"
+        },
+        "worker_provider": {
+          "type": "string"
+        },
+        "verifier_provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "exit_code",
+        "git_sha",
+        "branch",
+        "dirty",
+        "output_digest"
+      ]
     }
   },
   "required": [

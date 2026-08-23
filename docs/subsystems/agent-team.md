@@ -56,6 +56,27 @@ interface TeamMessageSource {
 
 Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
 
+```ts
+import type { SessionId } from '@deepseek-ai/dsh-session'
+
+/** Durable task lifecycle. */
+type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'completed' | 'deleted'
+
+/** Durable proof that a non-author ran a gate command against a named commit. */
+interface TeamTaskReceipt {
+  readonly verifierId: SessionId
+  readonly verifierName: string
+  readonly command: string
+  readonly exitCode: number
+  readonly gitSha: string
+  readonly branch: string
+  readonly dirty: boolean
+  readonly outputDigest: string
+  readonly workerProvider?: string
+  readonly verifierProvider?: string
+}
+```
+
 ```ts type-equiv
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 interface TeamTaskSnapshot {
@@ -67,10 +88,11 @@ interface TeamTaskSnapshot {
   readonly ownerId?: SessionId
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
+  readonly receipt?: TeamTaskReceipt
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `in_review` awaits independent verification, `completed` satisfies blockers, and `deleted` is a retained tombstone. Verification records its gate result in `receipt`. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
 
 ## Replay
 

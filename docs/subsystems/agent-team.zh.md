@@ -56,6 +56,27 @@ interface TeamMessageSource {
 
 每条 task event 都存储完整快照。`revision` 是 compare-and-set 值，每次变更递增 1。`blockedBy` edge 必须指向未删除任务，并维持无环图。`writeScopes` 是规范化的提示性路径前缀，不是锁。
 
+```ts
+import type { SessionId } from '@deepseek-ai/dsh-session'
+
+/** Durable task lifecycle. */
+type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'completed' | 'deleted'
+
+/** Durable proof that a non-author ran a gate command against a named commit. */
+interface TeamTaskReceipt {
+  readonly verifierId: SessionId
+  readonly verifierName: string
+  readonly command: string
+  readonly exitCode: number
+  readonly gitSha: string
+  readonly branch: string
+  readonly dirty: boolean
+  readonly outputDigest: string
+  readonly workerProvider?: string
+  readonly verifierProvider?: string
+}
+```
+
 ```ts type-equiv
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 interface TeamTaskSnapshot {
@@ -67,10 +88,11 @@ interface TeamTaskSnapshot {
   readonly ownerId?: SessionId
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
+  readonly receipt?: TeamTaskReceipt
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`deleted` 是保留的 tombstone。view 会添加 owner name、readiness 和 write-scope 重叠警告，但不会改变持久快照。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`in_review` 等待独立验证，`completed` 满足 blocker，`deleted` 是保留的 tombstone。验证会把 gate 结果记录到 `receipt`。view 会添加 owner name、readiness 和 write-scope 重叠警告，但不会改变持久快照。
 
 ## 回放
 

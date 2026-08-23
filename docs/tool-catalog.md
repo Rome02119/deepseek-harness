@@ -1912,6 +1912,7 @@ List shared tasks, including readiness, owner, revision, blockers, and write-sco
       "enum": [
         "pending",
         "in_progress",
+        "in_review",
         "completed"
       ]
     },
@@ -1962,6 +1963,7 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
         "edit",
         "set_dependencies",
         "complete",
+        "verify",
         "reopen",
         "reassign",
         "delete"
@@ -1992,6 +1994,45 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     "owner": {
       "type": "string",
       "description": "Member name for Lead-only reassign; omit to unassign."
+    },
+    "receipt": {
+      "type": "object",
+      "description": "Clean gate result for verify. Verifier identity comes from the calling Team member.",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "git_sha": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "output_digest": {
+          "type": "string"
+        },
+        "worker_provider": {
+          "type": "string"
+        },
+        "verifier_provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "exit_code",
+        "git_sha",
+        "branch",
+        "dirty",
+        "output_digest"
+      ]
     }
   },
   "required": [
