@@ -1,9 +1,16 @@
 /** Shared Team task DAG commands and runtime-enriched views. */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { TeamMembership } from './roster.ts'
 import { TeamError } from './error.ts'
-import { isActiveTeamMember, isTaskVerificationBlocked, type TeamFoldState } from './fold.ts'
+import {
+  assertTaskCounterTransition,
+  isActiveTeamMember,
+  isTaskAuthor,
+  isTaskVerificationBlocked,
+  type TeamFoldState,
+} from './fold.ts'
 import type { TeamJournal } from './journal.ts'
 import { resolveActiveMember } from './roster.ts'
 import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
@@ -65,6 +72,7 @@ export class TeamTaskBoard {
         subject: requiredText(request.subject, 'subject', 200),
         description: requiredText(request.description, 'description', 16_384),
         status: 'pending',
+        authorIds: [],
         attempts: 0,
         stagnation: 0,
         blockedBy: this.dependencies(request.blockedBy ?? [], state),
@@ -147,7 +155,7 @@ export class TeamTaskBoard {
           if (!reclaim && (current.status !== 'pending' || !this.taskReady(state, current))) {
             throw new TeamError(`team task "${current.id}" is not ready to claim`, 'TEAM_TASK_BLOCKED')
           }
-          next = { ...current, status: 'in_progress', ownerId: caller.id, leaseExpiresAt }
+          next = this.withOwner(current, caller.id, { leaseExpiresAt })
           break
         }
         case 'renew':
@@ -192,7 +200,7 @@ export class TeamTaskBoard {
           }
           if (request.receipt === undefined) throw new TeamError('verify requires a receipt', 'TEAM_INVALID_ARGUMENT')
           if (current.status !== 'in_review') throw new TeamError('only an in-review task can be verified', 'TEAM_TASK_INVALID_TRANSITION')
-          if (current.ownerId === caller.id) {
+          if (isTaskAuthor(current, caller.id)) {
             throw new TeamError('a task cannot be verified by its own author', 'TEAM_SELF_GRADING')
           }
           const receipt = {
@@ -246,7 +254,7 @@ export class TeamTaskBoard {
           }
           if (!this.taskReady(state, current)) throw new TeamError(`team task "${current.id}" is blocked`, 'TEAM_TASK_BLOCKED')
           const assignee = resolveActiveMember(root, state, request.owner)
-          next = { ...current, status: 'in_progress', ownerId: assignee.id }
+          next = this.withOwner(current, assignee.id)
           break
         }
         case 'unblock':
@@ -274,6 +282,7 @@ export class TeamTaskBoard {
         ...next,
         revision: current.revision + 1,
       }
+      assertTaskCounterTransition(current, task)
       this.assertTaskGraph(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 1, teamId: TeamId(root.id), task })
       return this.taskView(root, state, task, now)
@@ -320,6 +329,21 @@ export class TeamTaskBoard {
   /** Whether all current blockers completed. */
   private taskReady(state: TeamFoldState, task: TeamTaskSnapshot): boolean {
     return task.blockedBy.every(id => state.tasks.get(id)?.status === 'completed')
+  }
+
+  /** Assign an owner while retaining append-only task authorship. */
+  private withOwner(
+    task: TeamTaskSnapshot,
+    ownerId: SessionId,
+    fields: Partial<Pick<TeamTaskSnapshot, 'leaseExpiresAt'>> = {},
+  ): TeamTaskSnapshot {
+    return {
+      ...task,
+      ...fields,
+      status: 'in_progress',
+      ownerId,
+      authorIds: isTaskAuthor(task, ownerId) ? task.authorIds : [...task.authorIds, ownerId],
+    }
   }
 
   /** Remove an optional owner field under exactOptionalPropertyTypes. */

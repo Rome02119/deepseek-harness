@@ -54,7 +54,7 @@ interface TeamMessageSource {
 
 ## Shared task DAG
 
-Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. Claims and renewals record an absolute lease deadline; failed verification counters determine when a task becomes blocked. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
+Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. Claims and renewals record an absolute lease deadline. `authorIds` retains every owner in first-assignment order so no contributor may verify the task; failed verification counters determine when a task becomes blocked. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
 
 ```ts
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -86,6 +86,7 @@ interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  readonly authorIds: SessionId[]
   readonly leaseExpiresAt?: number
   readonly attempts: number
   readonly lastErrorSig?: string
@@ -100,7 +101,7 @@ interface TeamTaskSnapshot {
 
 ## Replay
 
-`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Replay carries `leaseExpiresAt` without consulting the current clock; task views derive expiry when read. Roster and task reads reach callers as views that add owner name, lease expiry, readiness, and write-scope warnings, while pending mail stays internal to delivery and recovery. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
+`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Replay carries `leaseExpiresAt` without consulting the current clock, requires `authorIds` to preserve its prior prefix, and rejects verification-counter decreases except the exact zero reset on unblock; task views derive expiry when read. Roster and task reads reach callers as views that add owner name, lease expiry, readiness, and write-scope warnings, while pending mail stays internal to delivery and recovery. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

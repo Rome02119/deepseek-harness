@@ -103,6 +103,10 @@ const teamTaskSnapshotSchema = z.object({
   description: z.string(),
   status: z.enum(['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted']),
   ownerId: sessionIdSchema.optional(),
+  authorIds: z.array(sessionIdSchema).refine(
+    ids => new Set(ids).size === ids.length,
+    { message: 'task author ids must not repeat' },
+  ),
   leaseExpiresAt: positiveSafeInteger.optional(),
   attempts: nonNegativeSafeInteger.default(0),
   lastErrorSig: z.string().optional(),
@@ -187,6 +191,36 @@ export function emptyTeamFoldState(rootId: SessionId): TeamFoldState {
  */
 export function isActiveTeamMember(state: TeamFoldState, memberId: SessionId): boolean {
   return state.id === toTeamId(memberId) || state.members.get(memberId)?.phase === 'active'
+}
+
+/**
+ * Test whether a member has ever owned a task.
+ * @param task - task with durable authorship history.
+ * @param memberId - candidate verifier Session id.
+ * @returns whether the member contributed as an owner.
+ */
+export function isTaskAuthor(
+  task: Pick<TeamTaskSnapshot, 'authorIds'>,
+  memberId: SessionId,
+): boolean {
+  return task.authorIds.includes(memberId)
+}
+
+/**
+ * Require failure counters to increase monotonically except when unblocking.
+ * @param prior - task snapshot before the transition.
+ * @param task - candidate next task snapshot.
+ */
+export function assertTaskCounterTransition(
+  prior: Pick<TeamTaskSnapshot, 'status' | 'attempts' | 'stagnation'>,
+  task: Pick<TeamTaskSnapshot, 'id' | 'status' | 'attempts' | 'stagnation'>,
+): void {
+  const unblocking = prior.status === 'blocked' && task.status === 'pending'
+  for (const field of ['attempts', 'stagnation'] as const) {
+    if (unblocking ? task[field] !== 0 : task[field] < prior[field]) {
+      throw new Error(`team task "${task.id}" ${unblocking ? 'unblocked without resetting' : 'lowered'} ${field}`)
+    }
+  }
 }
 
 /**
@@ -298,6 +332,15 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
       if (priorStatus === undefined ? task.status !== 'pending' : !teamTaskTransitions[priorStatus].includes(task.status)) {
         throw new Error(`team task "${task.id}" has an invalid ${priorStatus ?? 'new'} -> ${task.status} transition`)
       }
+      if (task.ownerId !== undefined && !isTaskAuthor(task, task.ownerId)) {
+        throw new Error(`team task "${task.id}" owner is missing from authorIds`)
+      }
+      if (prior !== undefined) {
+        if (!prior.authorIds.every((id, index) => task.authorIds[index] === id)) {
+          throw new Error(`team task "${task.id}" changed prior authorIds`)
+        }
+        assertTaskCounterTransition(prior, task)
+      }
       if (task.status === 'blocked') {
         if (!isTaskVerificationBlocked(task)) {
           throw new Error(`team task "${task.id}" blocked below the verification failure cap`)
@@ -312,16 +355,17 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
         && isTaskVerificationBlocked(task)) {
         throw new Error(`team task "${task.id}" remained pending at the verification failure cap`)
       }
-      if (priorStatus === 'blocked' && task.status === 'pending'
-        && (task.ownerId !== undefined || task.attempts !== 0 || task.stagnation !== 0)) {
-        throw new Error(`team task "${task.id}" unblocked without resetting ownership and failure counters`)
+      if (priorStatus === 'blocked' && task.status === 'pending' && task.ownerId !== undefined) {
+        throw new Error(`team task "${task.id}" unblocked without resetting ownership`)
       }
       if (task.status === 'completed') {
         const receipt = task.receipt
         if (receipt === undefined) throw new Error(`team task "${task.id}" completed without a receipt`)
         if (receipt.exitCode !== 0) throw new Error(`team task "${task.id}" completed with a failing receipt`)
         if (receipt.dirty) throw new Error(`team task "${task.id}" completed with a dirty receipt`)
-        if (receipt.verifierId === task.ownerId) throw new Error(`team task "${task.id}" was verified by its owner`)
+        if (isTaskAuthor(task, receipt.verifierId)) {
+          throw new Error(`team task "${task.id}" was verified by one of its authors`)
+        }
         if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
           throw new Error(`team task "${task.id}" was verified by its worker provider`)
         }

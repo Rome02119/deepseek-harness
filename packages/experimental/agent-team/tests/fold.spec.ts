@@ -5,6 +5,8 @@ import {
   applyTeamEvent,
   emptyTeamFoldState,
   foldTeam,
+  isActiveTeamMember,
+  isTaskAuthor,
   isTeamEvent,
 } from '../src/fold.ts'
 import type { TeamFoldState } from '../src/fold.ts'
@@ -58,18 +60,22 @@ function memberHistory(phase: TeamMemberSnapshot['phase']): SessionEvent[] {
 }
 
 function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
-  return {
+  const result: TeamTaskSnapshot = {
     id: TeamTaskId('task-1'),
     revision: 1,
     subject: 'subject',
     description: 'description',
     status: 'pending',
+    authorIds: [],
     attempts: 0,
     stagnation: 0,
     blockedBy: [],
     writeScopes: [],
     ...overrides,
   }
+  return result.ownerId !== undefined && overrides.authorIds === undefined
+    ? { ...result, authorIds: [result.ownerId] }
+    : result
 }
 
 function receipt(overrides: Partial<TeamTaskReceipt> = {}): TeamTaskReceipt {
@@ -88,18 +94,18 @@ function receipt(overrides: Partial<TeamTaskReceipt> = {}): TeamTaskReceipt {
   }
 }
 
-function taskReviewHistory(startSeq = 0): SessionEvent[] {
+function taskReviewHistory(startSeq = 0, ownerId = ROOT): SessionEvent[] {
   return [
     event('team/task', { version: 1, teamId: TEAM, task: task() }, startSeq),
     event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 2, status: 'in_progress', ownerId: ROOT }),
+      task: task({ revision: 2, status: 'in_progress', ownerId, authorIds: [ownerId] }),
     }, startSeq + 1),
     event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 3, status: 'in_review', ownerId: ROOT }),
+      task: task({ revision: 3, status: 'in_review', ownerId, authorIds: [ownerId] }),
     }, startSeq + 2),
   ]
 }
@@ -214,7 +220,7 @@ describe('Agent Teams fold', () => {
   it.each([
     ['a non-zero exit code', receipt({ exitCode: 1 }), /failing receipt/],
     ['a dirty tree', receipt({ dirty: true }), /dirty receipt/],
-    ['the task owner as verifier', receipt({ verifierId: ROOT }), /verified by its owner/],
+    ['a task author as verifier', receipt({ verifierId: ROOT }), /verified by one of its authors/],
     ['the worker provider as verifier', receipt({ verifierProvider: 'spawn' }), /worker provider/],
   ])('rejects a completed task receipt with %s', (_case, verification, expected) => {
     expect(() => foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
@@ -246,7 +252,7 @@ describe('Agent Teams fold', () => {
   )
 
   it('accepts the Team Lead as verifier without a roster row', () => {
-    const state = foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2), event('team/task', {
+    const state = foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2, CHILD), event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 4, status: 'completed', ownerId: CHILD, receipt: receipt({ verifierId: ROOT }) }),
@@ -265,13 +271,18 @@ describe('Agent Teams fold', () => {
     ])).toThrow(/invalid pending -> completed transition/)
   })
 
-  it('folds the legitimate review and verified completion sequence', () => {
+  it('replays a verification accepted by the API authorship and membership rules', () => {
     const verification = receipt()
-    const state = foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2), event('team/task', {
+    const records = [...memberHistory('active'), ...taskReviewHistory(2)]
+    const state = foldTeam(ROOT, records)
+    const reviewed = state.tasks.get(TeamTaskId('task-1'))!
+    expect(isActiveTeamMember(state, verification.verifierId)).toBe(true)
+    expect(isTaskAuthor(reviewed, verification.verifierId)).toBe(false)
+    expect(() => applyTeamEvent(state, event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
-    }, 5)])
+    }, 5))).not.toThrow()
     expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
   })
 
@@ -281,31 +292,66 @@ describe('Agent Teams fold', () => {
     expect(() => foldTeam(ROOT, [...review, event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 4, status: 'blocked', attempts: 2, stagnation: 2, receipt: failing }),
+      task: task({ revision: 4, status: 'blocked', authorIds: [ROOT], attempts: 2, stagnation: 2, receipt: failing }),
     }, 3)])).toThrow(/blocked below the verification failure cap/)
     expect(() => foldTeam(ROOT, [...review, event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 4, status: 'pending', attempts: 5, stagnation: 1, receipt: failing }),
+      task: task({ revision: 4, status: 'pending', authorIds: [ROOT], attempts: 5, stagnation: 1, receipt: failing }),
     }, 3)])).toThrow(/remained pending at the verification failure cap/)
 
     const blocked = event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 4, status: 'blocked', attempts: 3, stagnation: 3, receipt: failing }),
+      task: task({ revision: 4, status: 'blocked', authorIds: [ROOT], attempts: 3, stagnation: 3, receipt: failing }),
     }, 3)
     const unblocked = event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 5, status: 'pending', receipt: failing }),
+      task: task({ revision: 5, status: 'pending', authorIds: [ROOT], receipt: failing }),
     }, 4)
     expect(() => foldTeam(ROOT, [...review, blocked, event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 5, status: 'pending', attempts: 3, stagnation: 3, receipt: failing }),
-    }, 4)])).toThrow(/unblocked without resetting ownership and failure counters/)
+      task: task({ revision: 5, status: 'pending', authorIds: [ROOT], attempts: 3, stagnation: 3, receipt: failing }),
+    }, 4)])).toThrow(/unblocked without resetting attempts/)
     expect(foldTeam(ROOT, [...review, blocked, unblocked]).tasks.get(TeamTaskId('task-1')))
       .toMatchObject({ status: 'pending', attempts: 0, stagnation: 0 })
+  })
+
+  it.each([
+    ['drops', [CHILD]],
+    ['reorders', [CHILD, ROOT]],
+  ] as const)('rejects a task event that %s prior authorIds', (_case, authorIds) => {
+    const records = [
+      event('team/task', { version: 1, teamId: TEAM, task: task() }, 0),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', ownerId: ROOT, authorIds: [ROOT] }),
+      }, 1),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 3, status: 'in_progress', ownerId: CHILD, authorIds: [ROOT, CHILD] }),
+      }, 2),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 4, status: 'in_progress', ownerId: CHILD, authorIds: [...authorIds] }),
+      }, 3),
+    ]
+    expect(() => foldTeam(ROOT, records)).toThrow(/changed prior authorIds/)
+  })
+
+  it.each([
+    ['attempts', { attempts: 2, stagnation: 0 }, { attempts: 1, stagnation: 0 }],
+    ['stagnation', { attempts: 2, stagnation: 2 }, { attempts: 2, stagnation: 1 }],
+  ] as const)('rejects a task event that lowers %s', (field, prior, next) => {
+    expect(() => foldTeam(ROOT, [
+      event('team/task', { version: 1, teamId: TEAM, task: task(prior) }, 0),
+      event('team/task', { version: 1, teamId: TEAM, task: task({ revision: 2, ...next }) }, 1),
+    ])).toThrow(`team task "task-1" lowered ${field}`)
   })
 
   it('folds past lease timestamps deterministically without consulting the clock', () => {
@@ -335,6 +381,14 @@ describe('Agent Teams fold', () => {
       version: 1,
       teamId: TEAM,
       task: task({ [field]: value }),
+    }, 0)])).toThrow(/persisted Agent Teams team\/task payload is invalid/)
+  })
+
+  it('rejects duplicate persisted task author ids', () => {
+    expect(() => foldTeam(ROOT, [event('team/task', {
+      version: 1,
+      teamId: TEAM,
+      task: task({ authorIds: [ROOT, ROOT] }),
     }, 0)])).toThrow(/persisted Agent Teams team\/task payload is invalid/)
   })
 

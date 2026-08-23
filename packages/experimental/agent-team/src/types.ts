@@ -92,6 +92,7 @@ export interface TeamTaskSnapshot {
   readonly description: string
   readonly status: TeamTaskStatus
   readonly ownerId?: SessionId
+  readonly authorIds: SessionId[]
   readonly leaseExpiresAt?: number
   readonly attempts: number
   readonly lastErrorSig?: string

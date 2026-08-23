@@ -541,6 +541,7 @@ describe('Team shared task DAG', () => {
         subject: 'last numeric task',
         description: 'occupies the final safe numeric task id',
         status: 'pending',
+        authorIds: [],
         attempts: 0,
         stagnation: 0,
         blockedBy: [],
@@ -696,6 +697,139 @@ describe('Team shared task DAG', () => {
     vi.useRealTimers()
     ctx.agentTeams.interrupt(lead, 'lease-owner')
     await waitNoAgent(ctx, owner.id)
+  })
+
+  it('refuses verification by a prior owner after reclaim but accepts a non-author', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang', 'hang'], { leaseDurationMs: 1_000 })
+    const author = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaim-author')).member.id)
+    const reclaimer = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaimer')).member.id)
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaim-verifier')).member.id)
+    const task = await ctx.agentTeams.createTask(author, { subject: 'reclaim', description: 'reclaim attack' })
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    const claimed = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    vi.setSystemTime(11_001)
+    const reclaimed = await ctx.agentTeams.updateTask(reclaimer, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'claim',
+    })
+    const submitted = await ctx.agentTeams.updateTask(reclaimer, {
+      taskId: task.id, expectedRevision: reclaimed.revision, action: 'complete',
+    })
+
+    await expect(ctx.agentTeams.updateTask(author, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(author, 'reclaim-author'),
+    })).rejects.toMatchObject({ code: 'TEAM_SELF_GRADING' })
+    await expect(ctx.agentTeams.updateTask(verifier, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(verifier, 'reclaim-verifier'),
+    })).resolves.toMatchObject({ status: 'completed' })
+
+    vi.useRealTimers()
+    for (const name of ['reclaim-author', 'reclaimer', 'reclaim-verifier']) ctx.agentTeams.interrupt(lead, name)
+    await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, reclaimer.id), waitNoAgent(ctx, verifier.id)])
+  })
+
+  it('refuses verification by a prior owner after Lead reassignment', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const author = await waitRunning(ctx, (await spawn(ctx, lead, 'reassign-author')).member.id)
+    const assignee = await waitRunning(ctx, (await spawn(ctx, lead, 'assignee')).member.id)
+    const task = await ctx.agentTeams.createTask(author, { subject: 'reassign', description: 'reassign attack' })
+    const claimed = await ctx.agentTeams.updateTask(author, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    const reassigned = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'reassign', owner: 'assignee',
+    })
+    const submitted = await ctx.agentTeams.updateTask(assignee, {
+      taskId: task.id, expectedRevision: reassigned.revision, action: 'complete',
+    })
+
+    await expect(ctx.agentTeams.updateTask(author, {
+      taskId: task.id,
+      expectedRevision: submitted.revision,
+      action: 'verify',
+      receipt: receipt(author, 'reassign-author'),
+    })).rejects.toMatchObject({ code: 'TEAM_SELF_GRADING' })
+
+    ctx.agentTeams.interrupt(lead, 'reassign-author')
+    ctx.agentTeams.interrupt(lead, 'assignee')
+    await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, assignee.id)])
+  })
+
+  it('retains unique ordered task authors through owner removal and unblock', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang', 'hang'], { leaseDurationMs: 1_000 })
+    const first = await waitRunning(ctx, (await spawn(ctx, lead, 'first-author')).member.id)
+    const second = await waitRunning(ctx, (await spawn(ctx, lead, 'second-author')).member.id)
+    const third = await waitRunning(ctx, (await spawn(ctx, lead, 'third-author')).member.id)
+    const task = await ctx.agentTeams.createTask(first, { subject: 'authors', description: 'author history' })
+    const authorIds = (): SessionId[] => durable(lead).tasks.find(candidate => candidate.id === task.id)!.authorIds
+    vi.useFakeTimers()
+    vi.setSystemTime(10_000)
+    let current = await ctx.agentTeams.updateTask(first, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    vi.setSystemTime(11_001)
+    current = await ctx.agentTeams.updateTask(second, {
+      taskId: task.id, expectedRevision: current.revision, action: 'claim',
+    })
+    current = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: current.revision, action: 'reassign', owner: 'first-author',
+    })
+    current = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: current.revision, action: 'reassign', owner: 'third-author',
+    })
+    expect(authorIds()).toEqual([first.id, second.id, third.id])
+    current = await ctx.agentTeams.updateTask(third, {
+      taskId: task.id, expectedRevision: current.revision, action: 'release',
+    })
+    expect(authorIds()).toEqual([first.id, second.id, third.id])
+    current = await ctx.agentTeams.updateTask(third, {
+      taskId: task.id, expectedRevision: current.revision, action: 'claim',
+    })
+    current = await ctx.agentTeams.updateTask(third, {
+      taskId: task.id, expectedRevision: current.revision, action: 'complete',
+    })
+    current = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id,
+      expectedRevision: current.revision,
+      action: 'verify',
+      receipt: receipt(lead, 'lead'),
+    })
+    current = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: current.revision, action: 'reopen',
+    })
+    expect(authorIds()).toEqual([first.id, second.id, third.id])
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      current = await ctx.agentTeams.updateTask(third, {
+        taskId: task.id, expectedRevision: current.revision, action: 'claim',
+      })
+      current = await ctx.agentTeams.updateTask(third, {
+        taskId: task.id, expectedRevision: current.revision, action: 'complete',
+      })
+      current = await ctx.agentTeams.updateTask(lead, {
+        taskId: task.id,
+        expectedRevision: current.revision,
+        action: 'verify',
+        errorSig: 'same-failure',
+        receipt: receipt(lead, 'lead', { exitCode: 1 }),
+      })
+    }
+    current = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: current.revision, action: 'unblock',
+    })
+    expect(current).toMatchObject({ status: 'pending', attempts: 0, stagnation: 0 })
+    expect(authorIds()).toEqual([first.id, second.id, third.id])
+
+    vi.useRealTimers()
+    for (const name of ['first-author', 'second-author', 'third-author']) ctx.agentTeams.interrupt(lead, name)
+    await Promise.all([waitNoAgent(ctx, first.id), waitNoAgent(ctx, second.id), waitNoAgent(ctx, third.id)])
   })
 
   it('blocks five failed verifications until the Lead resets the task', async () => {
