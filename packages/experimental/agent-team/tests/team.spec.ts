@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { Context } from '@deepseek-ai/cordis'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -20,6 +20,29 @@ import type { TeamMemberSnapshot, TeamMessageSnapshot, TeamTaskReceipt, TeamTask
 
 const SIGNAL = new AbortController().signal
 const roots: string[] = []
+
+/** Minimal canonical-identity filesystem used by write-scope event tests. */
+class ScopeFileSystem extends Service {
+  constructor(ctx: Context) {
+    super(ctx, 'fs')
+  }
+
+  async resolve(path: string, options?: { cwd?: string }): Promise<FsTarget> {
+    const displayPath = resolve(options?.cwd ?? process.cwd(), path)
+    let identity = displayPath
+    try {
+      identity = realpathSync(displayPath)
+    } catch {
+      // Missing test targets retain their normalized identity.
+    }
+    return { targetKey: FsTargetKey(identity), displayPath }
+  }
+
+  contains(parent: FsTarget, child: FsTarget): boolean {
+    const path = relative(String(parent.targetKey), String(child.targetKey))
+    return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
+  }
+}
 
 afterEach(() => {
   vi.useRealTimers()
@@ -43,9 +66,11 @@ function durable(agent: Agent): {
 async function setup(
   script: ConstructorParameters<typeof MockAdapter>[0],
   config: ConstructorParameters<typeof TeamService>[1] = {},
+  cwd?: string,
 ) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
+  await ctx.plugin(ScopeFileSystem)
   const storageRoot = mkdtempSync(join(tmpdir(), 'dsh-team-'))
   roots.push(storageRoot)
   await ctx.plugin(JsonlSessionPersistence, { root: storageRoot })
@@ -56,7 +81,11 @@ async function setup(
   const teamFiber = await ctx.plugin(TeamService, config)
   const adapter = new MockAdapter(script)
   ctx.llm.registerAdapter(['mock'], adapter)
-  const lead = ctx.agentLoop.create(SessionId('lead'), { provider: 'mock', model: 'mock' })
+  const lead = ctx.agentLoop.create(
+    SessionId('lead'),
+    { provider: 'mock', model: 'mock' },
+    cwd === undefined ? {} : { cwd },
+  )
   return { ctx, lead, adapter, storageRoot, teamFiber }
 }
 
@@ -579,7 +608,7 @@ describe('Team shared task DAG', () => {
     const { ctx, lead } = await setup(['hang', 'hang'])
     const firstMember = await spawn(ctx, lead, 'alpha')
     const alpha = await waitRunning(ctx, firstMember.member.id)
-    const secondMember = await spawn(ctx, lead, 'beta')
+    const secondMember = await spawn(ctx, lead, 'beta', { context: 'fork', provider: 'fork' })
     const beta = await waitRunning(ctx, secondMember.member.id)
 
     const first = await ctx.agentTeams.createTask(alpha, {
@@ -704,7 +733,7 @@ describe('Team shared task DAG', () => {
     const { ctx, lead } = await setup(['hang', 'hang', 'hang'], { leaseDurationMs: 1_000 })
     const author = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaim-author')).member.id)
     const reclaimer = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaimer')).member.id)
-    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaim-verifier')).member.id)
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'reclaim-verifier', { context: 'fork', provider: 'fork' })).member.id)
     const task = await ctx.agentTeams.createTask(author, { subject: 'reclaim', description: 'reclaim attack' })
     vi.useFakeTimers()
     vi.setSystemTime(10_000)
@@ -766,7 +795,7 @@ describe('Team shared task DAG', () => {
 
   it('permits verification by an assignee who never acts on the task', async () => {
     const { ctx, lead } = await setup(['hang', 'hang'])
-    const assignee = await waitRunning(ctx, (await spawn(ctx, lead, 'idle-assignee')).member.id)
+    const assignee = await waitRunning(ctx, (await spawn(ctx, lead, 'idle-assignee', { context: 'fork', provider: 'fork' })).member.id)
     const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'assigned-worker')).member.id)
     const task = await ctx.agentTeams.createTask(lead, { subject: 'assignment', description: 'administrative assignment' })
     const assigned = await ctx.agentTeams.updateTask(lead, {
@@ -984,9 +1013,10 @@ describe('Team shared task DAG', () => {
   })
 
   it('rejects invalid verification and records a failed clean gate for retry', async () => {
-    const { ctx, lead } = await setup(['hang', 'hang'])
+    const { ctx, lead } = await setup(['hang', 'hang', 'hang'])
     const author = await waitRunning(ctx, (await spawn(ctx, lead, 'author')).member.id)
-    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'verifier')).member.id)
+    const peer = await waitRunning(ctx, (await spawn(ctx, lead, 'peer')).member.id)
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'verifier', { context: 'fork', provider: 'fork' })).member.id)
     const task = await ctx.agentTeams.createTask(author, { subject: 'gate', description: 'gate' })
 
     await expect(ctx.agentTeams.updateTask(verifier, {
@@ -1016,11 +1046,11 @@ describe('Team shared task DAG', () => {
       action: 'verify',
       receipt: receipt(verifier, 'verifier', { dirty: true }),
     })).rejects.toMatchObject({ code: 'TEAM_DIRTY_TREE' })
-    await expect(ctx.agentTeams.updateTask(verifier, {
+    await expect(ctx.agentTeams.updateTask(peer, {
       taskId: task.id,
       expectedRevision: submitted.revision,
       action: 'verify',
-      receipt: receipt(verifier, 'verifier', { workerProvider: 'spawn', verifierProvider: 'spawn' }),
+      receipt: receipt(peer, 'peer', { workerProvider: 'spawn', verifierProvider: 'fork' }),
     })).rejects.toMatchObject({ code: 'TEAM_SAME_PROVIDER' })
 
     const failedReceipt = receipt(verifier, 'verifier', { exitCode: 1 })
@@ -1034,14 +1064,15 @@ describe('Team shared task DAG', () => {
     expect(failed.ownerName).toBeUndefined()
 
     ctx.agentTeams.interrupt(lead, 'author')
+    ctx.agentTeams.interrupt(lead, 'peer')
     ctx.agentTeams.interrupt(lead, 'verifier')
-    await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, verifier.id)])
+    await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, peer.id), waitNoAgent(ctx, verifier.id)])
   })
 
   it('derives verifier identity so accepted receipts remain replayable', async () => {
     const { ctx, lead } = await setup(['hang', 'hang'])
     const author = await waitRunning(ctx, (await spawn(ctx, lead, 'author')).member.id)
-    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'verifier')).member.id)
+    const verifier = await waitRunning(ctx, (await spawn(ctx, lead, 'verifier', { context: 'fork', provider: 'fork' })).member.id)
     const task = await ctx.agentTeams.createTask(author, { subject: 'gate', description: 'gate' })
     const claimed = await ctx.agentTeams.updateTask(author, {
       taskId: task.id, expectedRevision: task.revision, action: 'claim',
@@ -1062,11 +1093,98 @@ describe('Team shared task DAG', () => {
     expect(durable(lead).tasks.find(candidate => candidate.id === task.id)?.receipt).toMatchObject({
       verifierId: verifier.id,
       verifierName: 'verifier',
+      workerProvider: 'spawn',
+      verifierProvider: 'fork',
     })
 
     ctx.agentTeams.interrupt(lead, 'author')
     ctx.agentTeams.interrupt(lead, 'verifier')
     await Promise.all([waitNoAgent(ctx, author.id), waitNoAgent(ctx, verifier.id)])
+  })
+
+  it('enforces requiresProvider on task claim, reassign, and unrestricted claim when undeclared', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const spawnWorker = await waitRunning(ctx, (await spawn(ctx, lead, 'spawn-worker', { context: 'fresh', provider: 'spawn' })).member.id)
+    const forkWorker = await waitRunning(ctx, (await spawn(ctx, lead, 'fork-worker', { context: 'fork', provider: 'fork' })).member.id)
+
+    const forkTask = await ctx.agentTeams.createTask(lead, {
+      subject: 'fork only',
+      description: 'requires fork provider',
+      requiresProvider: 'fork',
+    })
+    expect(forkTask.requiresProvider).toBe('fork')
+
+    await expect(ctx.agentTeams.updateTask(spawnWorker, {
+      taskId: forkTask.id,
+      expectedRevision: forkTask.revision,
+      action: 'claim',
+    })).rejects.toMatchObject({ code: 'TEAM_PROVIDER_MISMATCH' })
+
+    const claimedByFork = await ctx.agentTeams.updateTask(forkWorker, {
+      taskId: forkTask.id,
+      expectedRevision: forkTask.revision,
+      action: 'claim',
+    })
+    expect(claimedByFork).toMatchObject({ status: 'in_progress', ownerName: 'fork-worker' })
+
+    const releasedFork = await ctx.agentTeams.updateTask(forkWorker, {
+      taskId: forkTask.id,
+      expectedRevision: claimedByFork.revision,
+      action: 'release',
+    })
+
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: forkTask.id,
+      expectedRevision: releasedFork.revision,
+      action: 'reassign',
+      owner: 'spawn-worker',
+    })).rejects.toMatchObject({ code: 'TEAM_PROVIDER_MISMATCH' })
+
+    const reassignedFork = await ctx.agentTeams.updateTask(lead, {
+      taskId: forkTask.id,
+      expectedRevision: releasedFork.revision,
+      action: 'reassign',
+      owner: 'fork-worker',
+    })
+    expect(reassignedFork).toMatchObject({ status: 'in_progress', ownerName: 'fork-worker' })
+
+    const freeTask = await ctx.agentTeams.createTask(lead, {
+      subject: 'unrestricted',
+      description: 'no provider requirement',
+    })
+    expect(freeTask.requiresProvider).toBeUndefined()
+
+    const freeClaimedSpawn = await ctx.agentTeams.updateTask(spawnWorker, {
+      taskId: freeTask.id,
+      expectedRevision: freeTask.revision,
+      action: 'claim',
+    })
+    expect(freeClaimedSpawn).toMatchObject({ status: 'in_progress', ownerName: 'spawn-worker' })
+
+    const freeReleased = await ctx.agentTeams.updateTask(spawnWorker, {
+      taskId: freeTask.id,
+      expectedRevision: freeClaimedSpawn.revision,
+      action: 'release',
+    })
+
+    const freeClaimedFork = await ctx.agentTeams.updateTask(forkWorker, {
+      taskId: freeTask.id,
+      expectedRevision: freeReleased.revision,
+      action: 'claim',
+    })
+    expect(freeClaimedFork).toMatchObject({ status: 'in_progress', ownerName: 'fork-worker' })
+
+    const editedFork = await ctx.agentTeams.updateTask(forkWorker, {
+      taskId: freeTask.id,
+      expectedRevision: freeClaimedFork.revision,
+      action: 'edit',
+      requiresProvider: 'fork',
+    })
+    expect(editedFork.requiresProvider).toBe('fork')
+
+    ctx.agentTeams.interrupt(lead, 'spawn-worker')
+    ctx.agentTeams.interrupt(lead, 'fork-worker')
+    await Promise.all([waitNoAgent(ctx, spawnWorker.id), waitNoAgent(ctx, forkWorker.id)])
   })
 
   it('rejects a provisioning teammate before verification constructs a receipt', async () => {
@@ -2176,177 +2294,187 @@ describe('Team mailbox and waiting', () => {
   })
 })
 
-function fsTarget(path: string): FsTarget {
-  return { targetKey: FsTargetKey(path), displayPath: path }
+async function writeIntent(ctx: Context, agent: Agent, path: string, actor?: object) {
+  const cwd = agent.session.header.cwd
+  const target = await ctx.fs.resolve(path, cwd === undefined ? {} : { cwd })
+  return ctx.agents.withInitiator(agent, () =>
+    ctx.waterfall('fs/write-intent', target, actor, () => undefined))
+}
+
+async function editIntent(ctx: Context, agent: Agent, path: string, actor?: object) {
+  const cwd = agent.session.header.cwd
+  const target = await ctx.fs.resolve(path, cwd === undefined ? {} : { cwd })
+  return ctx.agents.withInitiator(agent, () =>
+    ctx.waterfall('fs/edit-intent', target, actor, () => undefined))
 }
 
 describe('Enforced write scopes', () => {
-  it('refuses writes outside declared writeScopes and allows writes within writeScopes', async () => {
+  it('normalizes traversal before enforcing writeScopes', async () => {
     const { ctx, lead } = await setup(['hang'])
-    const member = await spawn(ctx, lead, 'worker')
-    const worker = await waitRunning(ctx, member.member.id)
-
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'worker')).member.id)
     const task = await ctx.agentTeams.createTask(worker, {
-      subject: 'scoped task',
-      description: 'scoped to src/a/',
-      writeScopes: ['src/a/'],
+      subject: 'scoped task', description: 'scoped to src/a/', writeScopes: ['src/a/'],
     })
-
-    // Before claiming: agent has no in-progress task, so unrestricted
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
-    ).resolves.toBeUndefined()
-
-    // Claim task: agent now owns in-progress task with writeScopes ['src/a']
+    await expect(writeIntent(ctx, worker, 'src/b/x.ts')).resolves.toBeUndefined()
     await ctx.agentTeams.updateTask(worker, {
-      taskId: task.id,
-      expectedRevision: task.revision,
-      action: 'claim',
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
     })
 
-    // Out-of-scope write to src/b/x.ts is REFUSED with TEAM_OUT_OF_SCOPE_WRITE
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
-    ).rejects.toMatchObject({
-      name: 'TeamError',
+    for (const path of ['src/b/x.ts', 'src/ab/x.ts', 'src/a/../outside.ts']) {
+      await expect(writeIntent(ctx, worker, path)).rejects.toMatchObject({
+        name: 'TeamError', code: 'TEAM_OUT_OF_SCOPE_WRITE',
+      })
+    }
+    await expect(editIntent(ctx, worker, 'src/b/x.ts')).rejects.toMatchObject({
       code: 'TEAM_OUT_OF_SCOPE_WRITE',
     })
-
-    // Out-of-scope edit to src/b/x.ts is also REFUSED
-    await expect(
-      ctx.waterfall('fs/edit-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
-    ).rejects.toMatchObject({
-      name: 'TeamError',
-      code: 'TEAM_OUT_OF_SCOPE_WRITE',
-    })
-
-    // In-scope write to src/a/x.ts IS ALLOWED
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/a/x.ts'), { agent: worker }, () => undefined),
-    ).resolves.toBeUndefined()
-
-    // In-scope edit to src/a/x.ts IS ALLOWED
-    await expect(
-      ctx.waterfall('fs/edit-intent', fsTarget('src/a/x.ts'), { agent: worker }, () => undefined),
-    ).resolves.toBeUndefined()
-
-    // Prefix-correct matching: scope 'src/a' must NOT permit 'src/ab/x.ts'
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/ab/x.ts'), { agent: worker }, () => undefined),
-    ).rejects.toMatchObject({
-      name: 'TeamError',
-      code: 'TEAM_OUT_OF_SCOPE_WRITE',
-    })
+    await expect(writeIntent(ctx, worker, 'src/a/x.ts')).resolves.toBeUndefined()
+    await expect(editIntent(ctx, worker, 'src/a/x.ts')).resolves.toBeUndefined()
+    await expect(writeIntent(ctx, worker, 'src/a/../a/ok.ts')).resolves.toBeUndefined()
 
     ctx.agentTeams.interrupt(lead, 'worker')
     await waitNoAgent(ctx, worker.id)
   })
 
-  it('permits any write when task declares no writeScopes or agent has no in-progress task', async () => {
+  it('refuses a symlink inside a scope when its canonical target is outside', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'dsh-team-scope-workspace-'))
+    const outside = mkdtempSync(join(tmpdir(), 'dsh-team-scope-outside-'))
+    roots.push(workspace, outside)
+    mkdirSync(join(workspace, 'src/a'), { recursive: true })
+    writeFileSync(join(outside, 'escaped.ts'), 'escaped')
+    symlinkSync(outside, join(workspace, 'src/a/link'), process.platform === 'win32' ? 'junction' : 'dir')
+    const { ctx, lead } = await setup([], {}, workspace)
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'symlink scope', description: 'canonical identity', writeScopes: ['src/a'],
+    })
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+
+    await expect(writeIntent(ctx, lead, 'src/a/link/escaped.ts')).rejects.toMatchObject({
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+  })
+
+  it('enforces scopes while a submitted task is in review', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'review scope', description: 'retain owner scope', writeScopes: ['src/a'],
+    })
+    const claimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'complete',
+    })
+
+    await expect(writeIntent(ctx, lead, 'src/outside.ts')).rejects.toMatchObject({
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+  })
+
+  it('requires a write to satisfy every owned scoped task', async () => {
+    const { ctx, lead } = await setup([])
+    for (const scope of ['src/a', 'src/b']) {
+      const task = await ctx.agentTeams.createTask(lead, {
+        subject: scope, description: scope, writeScopes: [scope],
+      })
+      await ctx.agentTeams.updateTask(lead, {
+        taskId: task.id, expectedRevision: task.revision, action: 'claim',
+      })
+    }
+
+    await expect(writeIntent(ctx, lead, 'src/a/only.ts')).rejects.toMatchObject({
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+    await expect(writeIntent(ctx, lead, 'src/b/only.ts')).rejects.toMatchObject({
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+  })
+
+  it('retains a sampled scope when ownership changes during path resolution', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'sampled scope', description: 'release race', writeScopes: ['src/a'],
+    })
+    const claimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    const entered = Promise.withResolvers<undefined>()
+    const resume = Promise.withResolvers<undefined>()
+    const resolveTarget = ctx.fs.resolve.bind(ctx.fs)
+    vi.spyOn(ctx.fs, 'resolve').mockImplementation(async (path, options) => {
+      if (path === 'src/a') {
+        entered.resolve(undefined)
+        await resume.promise
+      }
+      return await resolveTarget(path, options)
+    })
+
+    const writing = writeIntent(ctx, lead, 'src/a/inside.ts')
+    await entered.promise
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id, expectedRevision: claimed.revision, action: 'release',
+    })
+    resume.resolve(undefined)
+    await expect(writing).rejects.toMatchObject({ code: 'TEAM_OUT_OF_SCOPE_WRITE' })
+  })
+
+  it('permits writes when no owned active task declares writeScopes', async () => {
     const { ctx, lead } = await setup(['hang'])
-    const member = await spawn(ctx, lead, 'unrestricted-worker')
-    const worker = await waitRunning(ctx, member.member.id)
-
-    // Unscoped task
+    const worker = await waitRunning(ctx, (await spawn(ctx, lead, 'unrestricted-worker')).member.id)
     const task = await ctx.agentTeams.createTask(worker, {
-      subject: 'unscoped task',
-      description: 'no write scopes declared',
-      writeScopes: [],
+      subject: 'unscoped task', description: 'no write scopes declared', writeScopes: [],
     })
-
+    const claimed = await ctx.agentTeams.updateTask(worker, {
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
+    })
+    await expect(writeIntent(ctx, worker, 'anywhere/file.ts')).resolves.toBeUndefined()
     await ctx.agentTeams.updateTask(worker, {
-      taskId: task.id,
-      expectedRevision: task.revision,
-      action: 'claim',
+      taskId: task.id, expectedRevision: claimed.revision, action: 'release',
     })
-
-    // Unrestricted writes allowed anywhere
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
-    ).resolves.toBeUndefined()
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('anywhere/file.ts'), { agent: worker }, () => undefined),
-    ).resolves.toBeUndefined()
-
-    // Release task: agent has no in-progress task -> unrestricted
-    await ctx.agentTeams.updateTask(worker, {
-      taskId: task.id,
-      expectedRevision: 2,
-      action: 'release',
-    })
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
-    ).resolves.toBeUndefined()
+    await expect(writeIntent(ctx, worker, 'src/b/x.ts')).resolves.toBeUndefined()
 
     ctx.agentTeams.interrupt(lead, 'unrestricted-worker')
     await waitNoAgent(ctx, worker.id)
   })
 
-  it('enforces write scopes on the Lead when Lead owns an in-progress scoped task', async () => {
+  it('enforces write scopes on the Lead', async () => {
     const { ctx, lead } = await setup([])
-
-    const leadTask = await ctx.agentTeams.createTask(lead, {
-      subject: 'lead task',
-      description: 'lead scoped work',
-      writeScopes: ['src/features/'],
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'lead task', description: 'lead scoped work', writeScopes: ['src/features/'],
     })
-
-    // Before claim: Lead has no in-progress task -> unrestricted
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/core.ts'), { agent: lead }, () => undefined),
-    ).resolves.toBeUndefined()
-
-    // Lead claims scoped task
+    await expect(writeIntent(ctx, lead, 'src/core.ts')).resolves.toBeUndefined()
     await ctx.agentTeams.updateTask(lead, {
-      taskId: leadTask.id,
-      expectedRevision: leadTask.revision,
-      action: 'claim',
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
     })
-
-    // Lead writing outside src/features/ is REFUSED
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/core.ts'), { agent: lead }, () => undefined),
-    ).rejects.toMatchObject({
-      name: 'TeamError',
+    await expect(writeIntent(ctx, lead, 'src/core.ts')).rejects.toMatchObject({
       code: 'TEAM_OUT_OF_SCOPE_WRITE',
     })
-
-    // Lead writing inside src/features/ IS ALLOWED
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/features/widget.ts'), { agent: lead }, () => undefined),
-    ).resolves.toBeUndefined()
+    await expect(writeIntent(ctx, lead, 'src/features/widget.ts')).resolves.toBeUndefined()
   })
 
-  it('permits writes from non-team actors or unassociated calls', async () => {
+  it('rejects unattributed writes and ignores caller-supplied actor attribution', async () => {
     const { ctx, lead } = await setup([])
-    // Actor with no agent
+    const target = await ctx.fs.resolve('any/path.ts')
     await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('any/path.ts'), undefined, () => undefined),
-    ).resolves.toBeUndefined()
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('any/path.ts'), {}, () => undefined),
-    ).resolves.toBeUndefined()
+      ctx.waterfall('fs/write-intent', target, { agent: lead }, () => undefined),
+    ).rejects.toMatchObject({ code: 'TEAM_UNATTRIBUTED_WRITE' })
 
-    // Non-team agent (e.g. detached agent)
     const outsider = await ctx.agents.create({
-      sessionId: SessionId('outsider'),
-      agentOptions: { provider: 'mock', model: 'mock' },
+      sessionId: SessionId('outsider'), agentOptions: { provider: 'mock', model: 'mock' },
     })
-    // Even if lead has scoped in-progress task
     const task = await ctx.agentTeams.createTask(lead, {
-      subject: 'lead scoped',
-      description: 'scoped only',
-      writeScopes: ['src/scoped'],
+      subject: 'lead scoped', description: 'scoped only', writeScopes: ['src/scoped'],
     })
     await ctx.agentTeams.updateTask(lead, {
-      taskId: task.id,
-      expectedRevision: task.revision,
-      action: 'claim',
+      taskId: task.id, expectedRevision: task.revision, action: 'claim',
     })
 
-    await expect(
-      ctx.waterfall('fs/write-intent', fsTarget('src/outside.ts'), { agent: outsider.agent }, () => undefined),
-    ).resolves.toBeUndefined()
+    await expect(writeIntent(ctx, lead, 'src/outside.ts', { agent: outsider.agent })).rejects.toMatchObject({
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+    await expect(writeIntent(ctx, outsider.agent, 'src/outside.ts', { agent: lead })).resolves.toBeUndefined()
     await outsider.dispose()
   })
 })

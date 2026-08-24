@@ -101,6 +101,14 @@ async function setup(ctx: Context, storageRoot: string) {
     provider: 'spawn',
     signal: SIGNAL,
   })
+  const peerMember = await ctx.agentTeams.spawnTeammate(lead, {
+    name: 'peer',
+    description: 'shares worker provider',
+    prompt: content('wait for work'),
+    context: 'fresh',
+    provider: 'spawn',
+    signal: SIGNAL,
+  })
   const inspectorMember = await ctx.agentTeams.spawnTeammate(lead, {
     name: 'inspector',
     description: 'verifies the work',
@@ -110,12 +118,13 @@ async function setup(ctx: Context, storageRoot: string) {
     signal: SIGNAL,
   })
   const worker = await waitRunning(ctx, workerMember.member.id)
+  const peer = await waitRunning(ctx, peerMember.member.id)
   const inspector = await waitRunning(ctx, inspectorMember.member.id)
-  return { lead, worker, inspector }
+  return { lead, worker, peer, inspector }
 }
 
 async function runDemo(ctx: Context, storageRoot: string, setNow: (value: number) => void): Promise<void> {
-  const { lead, worker, inspector } = await setup(ctx, storageRoot)
+  const { lead, worker, peer, inspector } = await setup(ctx, storageRoot)
   const providerReceipt = { workerProvider: 'spawn', verifierProvider: 'fork' }
 
   let task1 = await ctx.agentTeams.createTask(lead, {
@@ -154,12 +163,12 @@ async function runDemo(ctx: Context, storageRoot: string, setNow: (value: number
       receipt: receipt(inspector, 'inspector', { ...providerReceipt, dirty: true }),
     })
   })
-  await expectRefusal(6, 'inspector uses worker provider', 'TEAM_SAME_PROVIDER', async () => {
-    await ctx.agentTeams.updateTask(inspector, {
+  await expectRefusal(6, 'peer uses worker provider', 'TEAM_SAME_PROVIDER', async () => {
+    await ctx.agentTeams.updateTask(peer, {
       taskId: task1.id,
       expectedRevision: task1.revision,
       action: 'verify',
-      receipt: receipt(inspector, 'inspector', { workerProvider: 'spawn', verifierProvider: 'spawn' }),
+      receipt: receipt(peer, 'peer', { workerProvider: 'spawn', verifierProvider: 'fork' }),
     })
   })
 

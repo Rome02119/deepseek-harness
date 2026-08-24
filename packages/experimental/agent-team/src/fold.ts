@@ -102,6 +102,7 @@ const teamTaskSnapshotSchema = z.object({
   subject: z.string(),
   description: z.string(),
   status: z.enum(['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted']),
+  requiresProvider: z.string().optional(),
   ownerId: sessionIdSchema.optional(),
   authorIds: z.array(sessionIdSchema).refine(
     ids => new Set(ids).size === ids.length,
@@ -234,6 +235,40 @@ export function isTaskVerificationBlocked(
   return task.attempts >= 5 || task.stagnation >= 3
 }
 
+/**
+ * Test whether a candidate verifier shares a recorded roster provider with any task author.
+ * @param state - current Team fold containing recorded member providers.
+ * @param task - task with durable authorship history.
+ * @param verifierId - candidate verifier Session id.
+ * @returns whether the verifier shares a recorded provider with an author.
+ */
+export function isVerifierSameProvider(
+  state: TeamFoldState,
+  task: Pick<TeamTaskSnapshot, 'authorIds'>,
+  verifierId: SessionId,
+): boolean {
+  const verifierProvider = state.members.get(verifierId)?.provider
+  if (verifierProvider === undefined) return false
+  return task.authorIds.some(authorId => state.members.get(authorId)?.provider === verifierProvider)
+}
+
+/**
+ * Test whether a member satisfies a task's declared provider requirement.
+ * A task with no requiresProvider constraint is unrestricted.
+ * @param state - current Team fold containing recorded member providers.
+ * @param task - task snapshot carrying optional required provider.
+ * @param memberId - candidate owner Session id.
+ * @returns whether the member's roster provider matches the requirement.
+ */
+export function satisfiesTaskProvider(
+  state: TeamFoldState,
+  task: Pick<TeamTaskSnapshot, 'requiresProvider'>,
+  memberId: SessionId,
+): boolean {
+  if (task.requiresProvider === undefined) return true
+  return state.members.get(memberId)?.provider === task.requiresProvider
+}
+
 /** Whether one event belongs to the Team domain. */
 export type TeamEventType =
   | 'team/member'
@@ -347,6 +382,9 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
         }
         assertTaskCounterTransition(prior, task)
       }
+      if (task.ownerId !== undefined && !satisfiesTaskProvider(state, task, task.ownerId)) {
+        throw new Error(`team task "${task.id}" assigned to member "${task.ownerId}" violating requiresProvider`)
+      }
       if (task.status === 'blocked') {
         if (!isTaskVerificationBlocked(task)) {
           throw new Error(`team task "${task.id}" blocked below the verification failure cap`)
@@ -372,7 +410,7 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
         if (isTaskAuthor(task, receipt.verifierId)) {
           throw new Error(`team task "${task.id}" was verified by one of its authors`)
         }
-        if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
+        if (isVerifierSameProvider(state, task, receipt.verifierId)) {
           throw new Error(`team task "${task.id}" was verified by its worker provider`)
         }
         if (!isActiveTeamMember(state, receipt.verifierId)) {

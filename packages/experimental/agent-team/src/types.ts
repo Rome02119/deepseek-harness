@@ -91,6 +91,7 @@ export interface TeamTaskSnapshot {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
+  readonly requiresProvider?: string
   readonly ownerId?: SessionId
   readonly authorIds: SessionId[]
   readonly leaseExpiresAt?: number
@@ -109,6 +110,7 @@ export interface TeamTaskView {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
+  readonly requiresProvider?: string
   readonly leaseExpiresAt?: number
   readonly leaseExpired: boolean
   readonly attempts: number
@@ -195,6 +197,7 @@ export interface SendTeamMessageResult {
 export interface CreateTeamTaskRequest {
   readonly subject: string
   readonly description: string
+  readonly requiresProvider?: string
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
 }
@@ -220,6 +223,7 @@ export interface UpdateTeamTaskRequest {
   readonly action: TeamTaskAction
   readonly subject?: string
   readonly description?: string
+  readonly requiresProvider?: string
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
   readonly owner?: string

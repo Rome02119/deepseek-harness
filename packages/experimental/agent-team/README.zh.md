@@ -48,7 +48,7 @@ roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idl
 
 verification 失败会增加 `attempts`，并通过 `stagnation` 统计连续相同的 `errorSig`。失败五次或连续三次签名相同会把任务转为无 owner 的 `blocked`；blocked 任务不能被 claim，也不能满足 dependent。只有 Lead 可以执行 `unblock`，将任务恢复为 pending 并把两个计数器归零。
 
-`writeScopes` 会规范化为 workspace-relative 路径前缀。view 会对与 in-progress 任务的重叠发出警告，但绝不会阻止 claim 或授予文件写权限。它们是协作提示，不是锁。
+`writeScopes` 会规范化为 workspace-relative 路径前缀。Team initiator 拥有一个或多个带 scope 的 `in_progress` 或 `in_review` 任务时，只有 canonical target 同时属于每个任务的至少一个 scope，才能发出 filesystem write 或 edit intent；没有 initiating Agent 的 intent 会被拒绝。view 会对与 in-progress 任务的 scope 重叠发出警告，scope 不会阻止 claim。
 
 `waitForChange()` 可以等待注册后发生的下一条 roster、task、mailbox 或实时 status 边，时长范围为 10 秒到 1 小时；它只报告等待是否超时，也不会回放调用前已经发生的变化。运行时 dispose 会释放当前等待，并使后续等待不经超时立即返回。调用方需要在唤醒或超时后重新读取权威状态。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 以结构化检查结果报告，不再强制转成 object 字符串。`interrupt()` 仅限 Lead，并委托 continuable-subagent 的 interrupt 路径以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
 
@@ -73,7 +73,7 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 ## 已知限制与暂缓事项
 
 - **单进程、共享 checkout**：所有成员共享 cwd，修改立即可见；本包不提供 worktree、远端成员、自动 merge 或文件锁。
-- **write scope 仅作提示**：Bash、formatter、codegen 和直接外部写入可以绕过文件版本检查；Lead 必须协调 owner 并检查最终 diff。
+- **write scope 无法约束普通模型工具**：面向模型的 `bash`、`pwsh`、`terminal_send` 和 `run_code` 会绕过 filesystem intent event，可以写入所有声明 scope 之外。直接 subprocess、terminal 和外部写入也会绕过。guard 会在异步 scope 解析前后采样任务 owner 与 status，但无法阻止最终采样之后、filesystem mutation 之前发生的 release 或 reassign。
 - **扁平且不可变的 roster**：只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
 - **租期到期后仍需 claimant**：timer 不会改变持久状态；其他成员观察到 `leaseExpired` 后必须追加 reclaim。
 - **mailbox 不保证跨进程 exactly-once**：不支持多个 harness 进程并发操作同一 Team。

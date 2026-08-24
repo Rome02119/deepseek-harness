@@ -87,6 +87,7 @@ const TASK_VIEW_SCHEMA = {
     subject: { type: 'string', required: true },
     description: { type: 'string', required: true },
     status: { type: 'string', required: true, enum: ['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted'] },
+    requiresProvider: { type: 'string' },
     ownerName: { type: 'string' },
     leaseExpiresAt: { type: 'integer' },
     leaseExpired: { type: 'boolean', required: true },
@@ -310,6 +311,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
       parameters: {
         subject: { type: 'string', required: true, description: 'Concise task title.' },
         description: { type: 'string', required: true, description: 'Complete task details and acceptance criteria.' },
+        requires_provider: { type: 'string', description: 'Optional provider required to claim or work on this task.' },
         blocked_by: { type: 'array', items: { type: 'string' }, description: 'Task ids that must complete first.' },
         write_scopes: {
           type: 'array',
@@ -322,6 +324,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         return await ctx.agentTeams.createTask(callingAgent(exec.agent, 'team_task_create'), {
           subject: args.subject,
           description: args.description,
+          ...args.requires_provider === undefined ? {} : { requiresProvider: args.requires_provider },
           ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
         })
@@ -389,6 +392,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
         },
         subject: { type: 'string', description: 'Replacement title for edit.' },
         description: { type: 'string', description: 'Replacement details for edit.' },
+        requires_provider: { type: 'string', description: 'Replacement required provider for edit.' },
         blocked_by: { type: 'array', items: { type: 'string' }, description: 'Complete blocker list for set_dependencies.' },
         write_scopes: { type: 'array', items: { type: 'string' }, description: 'Replacement advisory write scopes for edit.' },
         owner: { type: 'string', description: 'Member name for Lead-only reassign; omit to unassign.' },
@@ -418,6 +422,7 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
           action: args.action,
           ...args.subject === undefined ? {} : { subject: args.subject },
           ...args.description === undefined ? {} : { description: args.description },
+          ...args.requires_provider === undefined ? {} : { requiresProvider: args.requires_provider },
           ...args.blocked_by === undefined ? {} : { blockedBy: args.blocked_by.map(TeamTaskId) },
           ...args.write_scopes === undefined ? {} : { writeScopes: args.write_scopes },
           ...args.owner === undefined ? {} : { owner: args.owner },

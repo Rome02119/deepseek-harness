@@ -85,6 +85,7 @@ interface TeamTaskSnapshot {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
+  readonly requiresProvider?: string
   readonly ownerId?: SessionId
   readonly authorIds: SessionId[]
   readonly leaseExpiresAt?: number

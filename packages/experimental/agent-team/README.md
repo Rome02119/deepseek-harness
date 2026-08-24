@@ -48,7 +48,7 @@ Dependencies must name current non-deleted tasks and form a complete DAG with no
 
 A failed verification increments `attempts` and tracks consecutive identical `errorSig` values in `stagnation`. Five failures or three consecutive matching signatures move the task to unowned `blocked`; blocked tasks cannot be claimed or satisfy dependents. Only the Lead can `unblock` a task, which returns it to pending and resets both counters.
 
-`writeScopes` are normalized workspace-relative prefixes. Views warn when they overlap an in-progress task, but they never block claim or authorize filesystem writes. They are coordination hints, not locks.
+`writeScopes` are normalized workspace-relative prefixes. A Team initiator that owns one or more scoped `in_progress` or `in_review` tasks may issue a filesystem write or edit intent only when the canonical target belongs to at least one scope on every such task; an intent without an initiating Agent is refused. Views warn when scopes overlap an in-progress task, and scopes do not block claim.
 
 `waitForChange()` waits for one roster, task, mailbox, or live-status edge that occurs after registration, for 10 seconds through one hour; it reports only whether the wait timed out and does not replay a change that already happened. Runtime disposal releases current waits and makes later waits return immediately without a timeout. Callers re-read authoritative state after wakeup or timeout. Cancellation preserves an Error reason or reports a non-Error reason through `TEAM_WAIT_ABORTED` with structural inspection instead of object coercion. `interrupt()` is Lead-only and delegates to the continuable-subagent interrupt path, which cancels only a live teammate's current turn with `keepInbox`; it neither releases task ownership nor deletes durable mail.
 
@@ -73,7 +73,7 @@ Peer messages append after the target's reusable history prefix. Cold resume reu
 ## Known Limitations and Deferred Work
 
 - **One process and one shared checkout** — members share cwd and observe edits immediately; this package provides no worktree, remote member, merge, or filesystem lock.
-- **Advisory write scopes** — Bash, formatters, code generators, and direct external writers can bypass filesystem version checks; Leads must coordinate ownership and review the final diff.
+- **Write scopes do not confine ordinary model tools** — Model-facing `bash`, `pwsh`, `terminal_send`, and `run_code` bypass filesystem intent events and can write outside every declared scope. Direct subprocess, terminal, and external writes bypass them too. The guard samples task ownership and status around asynchronous scope resolution but cannot stop a release or reassignment after its final sample and before the filesystem mutation.
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
 - **Lease expiry requires a claimant** — no timer mutates durable state; another member must append a reclaim after observing `leaseExpired`.
 - **Mailbox is not cross-process exactly-once** — concurrent harness processes over one Team are unsupported.

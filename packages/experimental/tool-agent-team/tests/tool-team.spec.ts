@@ -218,14 +218,16 @@ describe('dsh-tool-team', () => {
     const created = await execute(ctx, lead, 'team_task_create', {
       subject: 'tool task',
       description: 'created through tool',
+      requires_provider: 'spawn',
       blocked_by: [],
       write_scopes: ['src/team'],
     })
-    const task = JSON.parse(text(created)) as { id: string; revision: number }
+    const task = JSON.parse(text(created)) as { id: string; revision: number; requiresProvider?: string }
+    expect(task.requiresProvider).toBe('spawn')
     const listed = await execute(ctx, child, 'team_task_list', { ready: true, limit: 1 })
-    expect(JSON.parse(text(listed))).toMatchObject({ tasks: [{ id: task.id, ready: true }] })
+    expect(JSON.parse(text(listed))).toMatchObject({ tasks: [{ id: task.id, ready: true, requiresProvider: 'spawn' }] })
     const read = await execute(ctx, child, 'team_task_get', { task_id: task.id })
-    expect(JSON.parse(text(read))).toMatchObject({ id: task.id, revision: 1 })
+    expect(JSON.parse(text(read))).toMatchObject({ id: task.id, revision: 1, requiresProvider: 'spawn' })
     const claimed = await execute(ctx, child, 'team_task_update', {
       task_id: task.id,
       expected_revision: task.revision,
@@ -345,6 +347,13 @@ describe('dsh-tool-team', () => {
       write_scopes: ['src/team'],
     })
     const edit = JSON.parse(text(edited)) as { revision: number }
+    const editedSecond = await execute(ctx, lead, 'team_task_update', {
+      task_id: second.id,
+      expected_revision: second.revision,
+      action: 'edit',
+      requires_provider: 'fork',
+    })
+    expect(JSON.parse(text(editedSecond))).toMatchObject({ requiresProvider: 'fork' })
     const dependencies = await execute(ctx, lead, 'team_task_update', {
       task_id: first.id,
       expected_revision: edit.revision,

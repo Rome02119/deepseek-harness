@@ -9,6 +9,8 @@ import {
   isActiveTeamMember,
   isTaskAuthor,
   isTaskVerificationBlocked,
+  isVerifierSameProvider,
+  satisfiesTaskProvider,
   type TeamFoldState,
 } from './fold.ts'
 import type { TeamJournal } from './journal.ts'
@@ -18,6 +20,7 @@ import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
   CreateTeamTaskRequest,
+  TeamTaskReceipt,
   TeamTaskSnapshot,
   TeamTaskView,
   UpdateTeamTaskRequest,
@@ -72,6 +75,9 @@ export class TeamTaskBoard {
         subject: requiredText(request.subject, 'subject', 200),
         description: requiredText(request.description, 'description', 16_384),
         status: 'pending',
+        ...request.requiresProvider === undefined
+          ? {}
+          : { requiresProvider: requiredText(request.requiresProvider, 'requiresProvider', 200) },
         authorIds: [],
         attempts: 0,
         stagnation: 0,
@@ -155,6 +161,12 @@ export class TeamTaskBoard {
           if (!reclaim && (current.status !== 'pending' || !this.taskReady(state, current))) {
             throw new TeamError(`team task "${current.id}" is not ready to claim`, 'TEAM_TASK_BLOCKED')
           }
+          if (!satisfiesTaskProvider(state, current, caller.id)) {
+            throw new TeamError(
+              `team task "${current.id}" requires provider "${current.requiresProvider}"`,
+              'TEAM_PROVIDER_MISMATCH',
+            )
+          }
           next = this.withOwner(current, caller.id, { leaseExpiresAt })
           break
         }
@@ -172,8 +184,14 @@ export class TeamTaskBoard {
           break
         case 'edit':
           authorizeOwner()
-          if (request.subject === undefined && request.description === undefined && request.writeScopes === undefined) {
-            throw new TeamError('task edit requires subject, description, or write_scopes', 'TEAM_INVALID_ARGUMENT')
+          if (request.subject === undefined
+            && request.description === undefined
+            && request.writeScopes === undefined
+            && request.requiresProvider === undefined) {
+            throw new TeamError(
+              'task edit requires subject, description, write_scopes, or requires_provider',
+              'TEAM_INVALID_ARGUMENT',
+            )
           }
           next = {
             ...current,
@@ -182,6 +200,9 @@ export class TeamTaskBoard {
               ? {}
               : { description: requiredText(request.description, 'description', 16_384) },
             ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
+            ...request.requiresProvider === undefined
+              ? {}
+              : { requiresProvider: requiredText(request.requiresProvider, 'requiresProvider', 200) },
           }
           break
         case 'set_dependencies':
@@ -203,15 +224,21 @@ export class TeamTaskBoard {
           if (isTaskAuthor(current, caller.id)) {
             throw new TeamError('a task cannot be verified by its own author', 'TEAM_SELF_GRADING')
           }
-          const receipt = {
-            ...request.receipt,
-            verifierId: caller.id,
-            verifierName: resolveActiveMember(root, state, membership.name).name,
-          }
-          if (receipt.dirty) throw new TeamError('verification requires a clean tree', 'TEAM_DIRTY_TREE')
-          if (receipt.workerProvider !== undefined && receipt.workerProvider === receipt.verifierProvider) {
+          if (isVerifierSameProvider(state, current, caller.id)) {
             throw new TeamError('verifier must be a different provider than the worker', 'TEAM_SAME_PROVIDER')
           }
+          const verifierName = resolveActiveMember(root, state, membership.name).name
+          const verifierProvider = state.members.get(caller.id)?.provider
+          const workerId = current.authorIds.at(-1) ?? current.ownerId
+          const workerProvider = workerId !== undefined ? state.members.get(workerId)?.provider : undefined
+          const receipt: TeamTaskReceipt = {
+            ...request.receipt,
+            verifierId: caller.id,
+            verifierName,
+            ...workerProvider === undefined ? {} : { workerProvider },
+            ...verifierProvider === undefined ? {} : { verifierProvider },
+          }
+          if (receipt.dirty) throw new TeamError('verification requires a clean tree', 'TEAM_DIRTY_TREE')
           if (receipt.exitCode === 0) {
             next = { ...current, status: 'completed', receipt }
           } else {
@@ -254,6 +281,12 @@ export class TeamTaskBoard {
           }
           if (!this.taskReady(state, current)) throw new TeamError(`team task "${current.id}" is blocked`, 'TEAM_TASK_BLOCKED')
           const assignee = resolveActiveMember(root, state, request.owner)
+          if (!satisfiesTaskProvider(state, current, assignee.id)) {
+            throw new TeamError(
+              `team task "${current.id}" requires provider "${current.requiresProvider}"`,
+              'TEAM_PROVIDER_MISMATCH',
+            )
+          }
           next = this.withOwner(current, assignee.id)
           break
         }
@@ -393,6 +426,7 @@ export class TeamTaskBoard {
       subject: task.subject,
       description: task.description,
       status: task.status,
+      ...task.requiresProvider === undefined ? {} : { requiresProvider: task.requiresProvider },
       ...task.leaseExpiresAt === undefined ? {} : { leaseExpiresAt: task.leaseExpiresAt },
       leaseExpired: task.leaseExpiresAt !== undefined && now > task.leaseExpiresAt,
       attempts: task.attempts,

@@ -1859,6 +1859,10 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
       "type": "string",
       "description": "Complete task details and acceptance criteria."
     },
+    "requires_provider": {
+      "type": "string",
+      "description": "Optional provider required to claim or work on this task."
+    },
     "blocked_by": {
       "type": "array",
       "description": "Task ids that must complete first.",
@@ -1985,6 +1989,10 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
     "description": {
       "type": "string",
       "description": "Replacement details for edit."
+    },
+    "requires_provider": {
+      "type": "string",
+      "description": "Replacement required provider for edit."
     },
     "blocked_by": {
       "type": "array",

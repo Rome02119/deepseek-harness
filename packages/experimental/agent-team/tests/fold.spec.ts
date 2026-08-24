@@ -22,6 +22,7 @@ const ROOT = SessionId('team-root')
 const TEAM = TeamId(ROOT)
 const CHILD = SessionId('child-a')
 const REVIEWER = SessionId('child-b')
+const PEER = SessionId('child-c')
 
 function event<T extends SessionEventType>(type: T, data: SessionEventMap[T], seq: number): SessionEvent<T> {
   return { type, data, seq, time: seq } as SessionEvent<T>
@@ -58,6 +59,41 @@ function memberHistory(phase: TeamMemberSnapshot['phase']): SessionEvent[] {
     records.push(event('team/member', { version: 1, teamId: TEAM, member: member({ phase }) }, 1))
   }
   return records
+}
+
+function multiMemberRoster(): SessionEvent[] {
+  const worker: TeamMemberSnapshot = {
+    id: CHILD,
+    name: 'worker-a',
+    description: 'worker',
+    provider: 'spawn',
+    context: 'fresh',
+    phase: 'active',
+  }
+  const peer: TeamMemberSnapshot = {
+    id: PEER,
+    name: 'peer-c',
+    description: 'peer',
+    provider: 'spawn',
+    context: 'fresh',
+    phase: 'active',
+  }
+  const reviewer: TeamMemberSnapshot = {
+    id: REVIEWER,
+    name: 'reviewer-b',
+    description: 'reviewer',
+    provider: 'fork',
+    context: 'fork',
+    phase: 'active',
+  }
+  return [
+    event('team/member', { version: 1, teamId: TEAM, member: { ...worker, phase: 'provisioning' } }, 0),
+    event('team/member', { version: 1, teamId: TEAM, member: worker }, 1),
+    event('team/member', { version: 1, teamId: TEAM, member: { ...peer, phase: 'provisioning' } }, 2),
+    event('team/member', { version: 1, teamId: TEAM, member: peer }, 3),
+    event('team/member', { version: 1, teamId: TEAM, member: { ...reviewer, phase: 'provisioning' } }, 4),
+    event('team/member', { version: 1, teamId: TEAM, member: reviewer }, 5),
+  ]
 }
 
 function task(overrides: Partial<TeamTaskSnapshot> = {}): TeamTaskSnapshot {
@@ -219,16 +255,17 @@ describe('Agent Teams fold', () => {
   })
 
   it.each([
-    ['a non-zero exit code', receipt({ exitCode: 1 }), /failing receipt/],
-    ['a dirty tree', receipt({ dirty: true }), /dirty receipt/],
-    ['a task author as verifier', receipt({ verifierId: ROOT }), /verified by one of its authors/],
-    ['the worker provider as verifier', receipt({ verifierProvider: 'spawn' }), /worker provider/],
+    ['a non-zero exit code', receipt({ verifierId: REVIEWER, exitCode: 1 }), /failing receipt/],
+    ['a dirty tree', receipt({ verifierId: REVIEWER, dirty: true }), /dirty receipt/],
+    ['a task author as verifier', receipt({ verifierId: CHILD }), /verified by one of its authors/],
+    ['the worker provider as verifier', receipt({ verifierId: PEER }), /worker provider/],
   ])('rejects a completed task receipt with %s', (_case, verification, expected) => {
-    expect(() => foldTeam(ROOT, [...taskReviewHistory(), event('team/task', {
+    const roster = multiMemberRoster()
+    expect(() => foldTeam(ROOT, [...roster, ...taskReviewHistory(roster.length, CHILD), event('team/task', {
       version: 1,
       teamId: TEAM,
-      task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
-    }, 3)])).toThrow(expected)
+      task: task({ revision: 4, status: 'completed', ownerId: CHILD, authorIds: [CHILD], receipt: verification }),
+    }, roster.length + 3)])).toThrow(expected)
   })
 
   it('rejects a completed task verified by an id outside the Team roster', () => {
@@ -285,6 +322,81 @@ describe('Agent Teams fold', () => {
       task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
     }, 5)) }).not.toThrow()
     expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
+  })
+
+  it('rejects a forged completed event when verifier shares roster provider with an author even if receipt lies', () => {
+    const roster = multiMemberRoster()
+    const lyingReceipt = receipt({
+      verifierId: PEER,
+      workerProvider: 'spawn',
+      verifierProvider: 'fork',
+    })
+    expect(() => foldTeam(ROOT, [
+      ...roster,
+      ...taskReviewHistory(roster.length, CHILD),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 4, status: 'completed', ownerId: CHILD, authorIds: [CHILD], receipt: lyingReceipt }),
+      }, roster.length + 3),
+    ])).toThrow(/was verified by its worker provider/)
+  })
+
+  it('rejects a forged claim event assigned to a member violating requiresProvider', () => {
+    const roster = multiMemberRoster()
+    expect(() => foldTeam(ROOT, [
+      ...roster,
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ requiresProvider: 'fork' }),
+      }, roster.length),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', requiresProvider: 'fork', ownerId: CHILD }),
+      }, roster.length + 1),
+    ])).toThrow(`team task "task-1" assigned to member "${CHILD}" violating requiresProvider`)
+  })
+
+  it('accepts a task completed by a verifier on a different provider satisfying requiresProvider', () => {
+    const roster = multiMemberRoster()
+    const records = [
+      ...roster,
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ requiresProvider: 'spawn' }),
+      }, roster.length),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 2, status: 'in_progress', requiresProvider: 'spawn', ownerId: CHILD, authorIds: [CHILD] }),
+      }, roster.length + 1),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({ revision: 3, status: 'in_review', requiresProvider: 'spawn', ownerId: CHILD, authorIds: [CHILD] }),
+      }, roster.length + 2),
+      event('team/task', {
+        version: 1,
+        teamId: TEAM,
+        task: task({
+          revision: 4,
+          status: 'completed',
+          requiresProvider: 'spawn',
+          ownerId: CHILD,
+          authorIds: [CHILD],
+          receipt: receipt({ verifierId: REVIEWER, workerProvider: 'spawn', verifierProvider: 'fork' }),
+        }),
+      }, roster.length + 3),
+    ]
+    expect(() => foldTeam(ROOT, records)).not.toThrow()
+    const state = foldTeam(ROOT, records)
+    expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({
+      status: 'completed',
+      requiresProvider: 'spawn',
+    })
   })
 
   it('replays verification by an assignee who never acted on the task', () => {

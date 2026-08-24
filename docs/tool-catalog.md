@@ -1853,6 +1853,10 @@ Create one unowned pending task on the shared Team task board.
       "type": "string",
       "description": "Complete task details and acceptance criteria."
     },
+    "requires_provider": {
+      "type": "string",
+      "description": "Optional provider required to claim or work on this task."
+    },
     "blocked_by": {
       "type": "array",
       "description": "Task ids that must complete first.",
@@ -1979,6 +1983,10 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     "description": {
       "type": "string",
       "description": "Replacement details for edit."
+    },
+    "requires_provider": {
+      "type": "string",
+      "description": "Replacement required provider for edit."
     },
     "blocked_by": {
       "type": "array",
