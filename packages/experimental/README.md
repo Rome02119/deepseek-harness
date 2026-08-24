@@ -7,6 +7,7 @@ This group contains prototypes and internal-only Cordis plugins that use the rep
 | Package | Role | ctx key |
 |---|---|---|
 | `agent-team/` | Implicit-root Agent Teams roster, durable peer mailbox, shared task DAG, and runtime coordination | `ctx.agentTeams` |
+| `agent-team-external-cli/` | Bridge that seats a Claude CLI process as an Agent Teams teammate | registers on `ctx.subagents` |
 | `tool-agent-team/` | Scoped model-facing Agent Teams tools and collaboration guidance | — |
 
 The [subtree rules](AGENTS.md) define dependency isolation, release exclusion, and promotion.

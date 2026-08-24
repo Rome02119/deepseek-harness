@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-08-24-agent-team-external-cli-bridge.md
+2026-08-24-agent-team-external-cli-bridge.md: e66af609608a262a81189f8e108f51b249f2863a
+2026-08-24-agent-team-external-cli-bridge.zh.md: 9892d1bf196880f7454001d5d3572b628cef49db

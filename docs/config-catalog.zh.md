@@ -645,6 +645,42 @@ export interface Config {
 
 来源：[`packages/experimental/agent-team/src/types.ts:125`](../packages/experimental/agent-team/src/types.ts)
 
+<a id="deepseek-aidsh-experimental-agent-team-external-cli"></a>
+
+## `@deepseek-ai/dsh-experimental-agent-team-external-cli`
+
+需要：`subagents` · `llm` · `subprocess` · `agentTeams`
+
+```ts config-catalog
+/** Deployment-owned CLI route and process bounds. */
+export interface Config {
+  /** Provider name used on Agent Team roster entries. */
+  readonly providerName?: string
+  /** Internal LLM route installed only for bridged teammates. */
+  readonly llmProvider?: string
+  /** Model id recorded on bridged assistant messages. */
+  readonly model?: string
+  /** CLI executable path or PATH name. */
+  readonly command?: string
+  /** Invocation style for the target CLI. */
+  readonly cliKind?: CliKind
+  /** Claude Code unattended permission mode; ignored by `agy`. */
+  readonly permissionMode?: string
+  /** Explicit environment layered over the subprocess seam's scrubbed parent environment. */
+  readonly env?: Record<string, string>
+  /** Grace in milliseconds for subprocess tree termination. */
+  readonly disposeGraceMs?: number
+  /** Maximum collected stdout bytes retained as the teammate answer. */
+  readonly stdoutMaxBytes?: number
+  /** Maximum collected stderr bytes retained for failure diagnostics. */
+  readonly stderrMaxBytes?: number
+}
+
+type CliKind = typeof CLI_KINDS[number]
+```
+
+来源：[`packages/experimental/agent-team-external-cli/src/index.ts:48`](../packages/experimental/agent-team-external-cli/src/index.ts)
+
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
 ## `@deepseek-ai/dsh-experimental-tool-agent-team`
