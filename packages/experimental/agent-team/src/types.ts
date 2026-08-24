@@ -68,21 +68,7 @@ export interface TeamMemberView {
 }
 
 /** Durable task lifecycle. */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'blocked' | 'completed' | 'deleted'
-
-/** Durable proof that a non-author ran a gate command against a named commit. */
-export interface TeamTaskReceipt {
-  readonly verifierId: SessionId
-  readonly verifierName: string
-  readonly command: string
-  readonly exitCode: number
-  readonly gitSha: string
-  readonly branch: string
-  readonly dirty: boolean
-  readonly outputDigest: string
-  readonly workerProvider?: string
-  readonly verifierProvider?: string
-}
+export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
 
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
 export interface TeamTaskSnapshot {
@@ -91,16 +77,9 @@ export interface TeamTaskSnapshot {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
-  readonly requiresProvider?: string
   readonly ownerId?: SessionId
-  readonly authorIds: SessionId[]
-  readonly leaseExpiresAt?: number
-  readonly attempts: number
-  readonly lastErrorSig?: string
-  readonly stagnation: number
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
-  readonly receipt?: TeamTaskReceipt
 }
 
 /** Runtime-enriched task view returned to tools and hosts. */
@@ -110,14 +89,8 @@ export interface TeamTaskView {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
-  readonly requiresProvider?: string
-  readonly leaseExpiresAt?: number
-  readonly leaseExpired: boolean
-  readonly attempts: number
-  readonly stagnation: number
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
-  readonly receipt?: TeamTaskReceipt
   readonly ownerName?: string
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
@@ -154,8 +127,6 @@ export interface Config {
   readonly maxMembers?: number
   /** Maximum non-deleted tasks retained by one Team. */
   readonly maxTasks?: number
-  /** Lease duration assigned by task claim and renewal operations. */
-  readonly leaseDurationMs?: number
   /** Maximum queued-minus-delivered messages for one target member. */
   readonly maxPendingMessagesPerMember?: number
   /** Maximum UTF-8 bytes in one complete sender-framed delivery. */
@@ -197,7 +168,6 @@ export interface SendTeamMessageResult {
 export interface CreateTeamTaskRequest {
   readonly subject: string
   readonly description: string
-  readonly requiresProvider?: string
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
 }
@@ -205,15 +175,12 @@ export interface CreateTeamTaskRequest {
 /** Supported task mutation actions. */
 export type TeamTaskAction =
   | 'claim'
-  | 'renew'
   | 'release'
   | 'edit'
   | 'set_dependencies'
   | 'complete'
-  | 'verify'
   | 'reopen'
   | 'reassign'
-  | 'unblock'
   | 'delete'
 
 /** Compare-and-set mutation of one shared task. */
@@ -223,12 +190,9 @@ export interface UpdateTeamTaskRequest {
   readonly action: TeamTaskAction
   readonly subject?: string
   readonly description?: string
-  readonly requiresProvider?: string
   readonly blockedBy?: readonly TeamTaskId[]
   readonly writeScopes?: readonly string[]
   readonly owner?: string
-  readonly errorSig?: string
-  readonly receipt?: TeamTaskReceipt
 }
 
 /** Result of waiting for Team activity. */

@@ -1,18 +1,9 @@
 /** Shared Team task DAG commands and runtime-enriched views. */
 
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { TeamMembership } from './roster.ts'
 import { TeamError } from './error.ts'
-import {
-  assertTaskCounterTransition,
-  isActiveTeamMember,
-  isTaskAuthor,
-  isTaskVerificationBlocked,
-  isVerifierSameProvider,
-  satisfiesTaskProvider,
-  type TeamFoldState,
-} from './fold.ts'
+import type { TeamFoldState } from './fold.ts'
 import type { TeamJournal } from './journal.ts'
 import { resolveActiveMember } from './roster.ts'
 import { assertTaskGraphCandidate, TeamTaskGraphError } from './task-graph.ts'
@@ -20,7 +11,6 @@ import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
   CreateTeamTaskRequest,
-  TeamTaskReceipt,
   TeamTaskSnapshot,
   TeamTaskView,
   UpdateTeamTaskRequest,
@@ -43,12 +33,10 @@ export class TeamTaskBoard {
   /**
    * @param journal - authoritative Lead-log transaction owner.
    * @param maxTasks - maximum non-deleted tasks retained by one Team.
-   * @param leaseDurationMs - milliseconds assigned to each claim or renewal.
    */
   constructor(
     private readonly journal: TeamJournal,
     private readonly maxTasks: number,
-    private readonly leaseDurationMs: number,
   ) {}
 
   /**
@@ -75,18 +63,12 @@ export class TeamTaskBoard {
         subject: requiredText(request.subject, 'subject', 200),
         description: requiredText(request.description, 'description', 16_384),
         status: 'pending',
-        ...request.requiresProvider === undefined
-          ? {}
-          : { requiresProvider: requiredText(request.requiresProvider, 'requiresProvider', 200) },
-        authorIds: [],
-        attempts: 0,
-        stagnation: 0,
         blockedBy: this.dependencies(request.blockedBy ?? [], state),
         writeScopes: this.writeScopes(request.writeScopes ?? []),
       }
       this.assertTaskGraph(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 1, teamId: TeamId(root.id), task })
-      return this.taskView(root, state, task, Date.now())
+      return this.taskView(root, state, task)
     })
   }
 
@@ -101,7 +83,7 @@ export class TeamTaskBoard {
     const state = this.journal.state(root)
     const task = state.tasks.get(id)
     if (task === undefined) throw new TeamError(`team task "${id}" not found`, 'TEAM_TASK_NOT_FOUND')
-    return this.taskView(root, state, task, Date.now())
+    return this.taskView(root, state, task)
   }
 
   /**
@@ -112,10 +94,9 @@ export class TeamTaskBoard {
   list(membership: TeamMembership): TeamTaskView[] {
     const { root } = membership
     const state = this.journal.state(root)
-    const now = Date.now()
     return [...state.tasks.values()]
       .filter(task => task.status !== 'deleted')
-      .map(task => this.taskView(root, state, task, now))
+      .map(task => this.taskView(root, state, task))
   }
 
   /**
@@ -132,7 +113,6 @@ export class TeamTaskBoard {
   ): Promise<TeamTaskView> {
     const root = membership.root
     return this.journal.transact(root.id, async () => {
-      const now = Date.now()
       const state = this.journal.state(root)
       const current = state.tasks.get(request.taskId)
       if (current === undefined) throw new TeamError(`team task "${request.taskId}" not found`, 'TEAM_TASK_NOT_FOUND')
@@ -149,33 +129,15 @@ export class TeamTaskBoard {
         if (!lead && !owner) throw new TeamError('task mutation requires its owner or Team Lead', 'TEAM_TASK_UNAUTHORIZED')
       }
       let next: TeamTaskSnapshot
-      const leaseExpiresAt = Math.min(Number.MAX_SAFE_INTEGER, now + this.leaseDurationMs)
       switch (request.action) {
-        case 'claim': {
-          const reclaim = current.status === 'in_progress'
-            && current.leaseExpiresAt !== undefined
-            && now > current.leaseExpiresAt
-          if (!reclaim && current.ownerId !== undefined && current.ownerId !== caller.id) {
+        case 'claim':
+          if (current.ownerId !== undefined && current.ownerId !== caller.id) {
             throw new TeamError(`team task "${current.id}" is owned by another member`, 'TEAM_TASK_ALREADY_CLAIMED')
           }
-          if (!reclaim && (current.status !== 'pending' || !this.taskReady(state, current))) {
+          if (current.status !== 'pending' || !this.taskReady(state, current)) {
             throw new TeamError(`team task "${current.id}" is not ready to claim`, 'TEAM_TASK_BLOCKED')
           }
-          if (!satisfiesTaskProvider(state, current, caller.id)) {
-            throw new TeamError(
-              `team task "${current.id}" requires provider "${current.requiresProvider}"`,
-              'TEAM_PROVIDER_MISMATCH',
-            )
-          }
-          next = this.withOwner(current, caller.id, { leaseExpiresAt })
-          break
-        }
-        case 'renew':
-          if (current.status !== 'in_progress') {
-            throw new TeamError('only an in-progress task lease can be renewed', 'TEAM_TASK_INVALID_TRANSITION')
-          }
-          if (!owner) throw new TeamError('task lease renewal requires its owner', 'TEAM_TASK_NOT_OWNER')
-          next = { ...current, leaseExpiresAt }
+          next = { ...current, status: 'in_progress', ownerId: caller.id }
           break
         case 'release':
           authorizeOwner()
@@ -184,14 +146,8 @@ export class TeamTaskBoard {
           break
         case 'edit':
           authorizeOwner()
-          if (request.subject === undefined
-            && request.description === undefined
-            && request.writeScopes === undefined
-            && request.requiresProvider === undefined) {
-            throw new TeamError(
-              'task edit requires subject, description, write_scopes, or requires_provider',
-              'TEAM_INVALID_ARGUMENT',
-            )
+          if (request.subject === undefined && request.description === undefined && request.writeScopes === undefined) {
+            throw new TeamError('task edit requires subject, description, or write_scopes', 'TEAM_INVALID_ARGUMENT')
           }
           next = {
             ...current,
@@ -200,9 +156,6 @@ export class TeamTaskBoard {
               ? {}
               : { description: requiredText(request.description, 'description', 16_384) },
             ...request.writeScopes === undefined ? {} : { writeScopes: this.writeScopes(request.writeScopes) },
-            ...request.requiresProvider === undefined
-              ? {}
-              : { requiresProvider: requiredText(request.requiresProvider, 'requiresProvider', 200) },
           }
           break
         case 'set_dependencies':
@@ -213,58 +166,11 @@ export class TeamTaskBoard {
         case 'complete':
           authorizeOwner()
           if (current.status !== 'in_progress') throw new TeamError('only an in-progress task can complete', 'TEAM_TASK_INVALID_TRANSITION')
-          next = this.withoutLease({ ...current, status: 'in_review' })
+          next = { ...current, status: 'completed' }
           break
-        case 'verify': {
-          if (!isActiveTeamMember(state, caller.id)) {
-            throw new TeamError(`Team member "${caller.id}" is not active`, 'TEAM_MEMBER_NOT_ACTIVE')
-          }
-          if (request.receipt === undefined) throw new TeamError('verify requires a receipt', 'TEAM_INVALID_ARGUMENT')
-          if (current.status !== 'in_review') throw new TeamError('only an in-review task can be verified', 'TEAM_TASK_INVALID_TRANSITION')
-          if (isTaskAuthor(current, caller.id)) {
-            throw new TeamError('a task cannot be verified by its own author', 'TEAM_SELF_GRADING')
-          }
-          if (isVerifierSameProvider(state, current, caller.id)) {
-            throw new TeamError('verifier must be a different provider than the worker', 'TEAM_SAME_PROVIDER')
-          }
-          const verifierName = resolveActiveMember(root, state, membership.name).name
-          const verifierProvider = state.members.get(caller.id)?.provider
-          const workerId = current.authorIds.at(-1) ?? current.ownerId
-          const workerProvider = workerId !== undefined ? state.members.get(workerId)?.provider : undefined
-          const receipt: TeamTaskReceipt = {
-            ...request.receipt,
-            verifierId: caller.id,
-            verifierName,
-            ...workerProvider === undefined ? {} : { workerProvider },
-            ...verifierProvider === undefined ? {} : { verifierProvider },
-          }
-          if (receipt.dirty) throw new TeamError('verification requires a clean tree', 'TEAM_DIRTY_TREE')
-          if (receipt.exitCode === 0) {
-            next = { ...current, status: 'completed', receipt }
-          } else {
-            const attempts = current.attempts + 1
-            const stagnation = request.errorSig === current.lastErrorSig ? current.stagnation + 1 : 1
-            const { lastErrorSig: _lastErrorSig, ...withoutLastErrorSig } = current
-            const failed: TeamTaskSnapshot = {
-              ...withoutLastErrorSig,
-              status: 'pending',
-              receipt,
-              attempts,
-              stagnation,
-              ...request.errorSig === undefined ? {} : { lastErrorSig: request.errorSig },
-            }
-            next = this.withoutOwner({
-              ...failed,
-              status: isTaskVerificationBlocked(failed) ? 'blocked' : 'pending',
-            })
-          }
-          break
-        }
         case 'reopen':
           authorizeOwner()
-          if (current.status !== 'completed' && current.status !== 'in_review') {
-            throw new TeamError('only a completed or in-review task can reopen', 'TEAM_TASK_INVALID_TRANSITION')
-          }
+          if (current.status !== 'completed') throw new TeamError('only a completed task can reopen', 'TEAM_TASK_INVALID_TRANSITION')
           next = this.withoutOwner({ ...current, status: 'pending' })
           break
         case 'reassign': {
@@ -281,22 +187,9 @@ export class TeamTaskBoard {
           }
           if (!this.taskReady(state, current)) throw new TeamError(`team task "${current.id}" is blocked`, 'TEAM_TASK_BLOCKED')
           const assignee = resolveActiveMember(root, state, request.owner)
-          if (!satisfiesTaskProvider(state, current, assignee.id)) {
-            throw new TeamError(
-              `team task "${current.id}" requires provider "${current.requiresProvider}"`,
-              'TEAM_PROVIDER_MISMATCH',
-            )
-          }
-          next = this.withOwner(current, assignee.id)
+          next = { ...current, status: 'in_progress', ownerId: assignee.id }
           break
         }
-        case 'unblock':
-          if (!lead) throw new TeamError('only the Team Lead can unblock tasks', 'TEAM_LEAD_REQUIRED')
-          if (current.status !== 'blocked') {
-            throw new TeamError('only a blocked task can be unblocked', 'TEAM_TASK_INVALID_TRANSITION')
-          }
-          next = this.withoutOwner({ ...current, status: 'pending', attempts: 0, stagnation: 0 })
-          break
         case 'delete': {
           authorizeOwner()
           const dependent = [...state.tasks.values()].find(task =>
@@ -311,20 +204,13 @@ export class TeamTaskBoard {
         default:
           throw new TeamError(`unsupported task action ${String(request.action)}`, 'TEAM_INVALID_ARGUMENT')
       }
-      const contributed = request.action === 'claim'
-        || owner && (request.action === 'renew'
-          || request.action === 'edit'
-          || request.action === 'set_dependencies'
-          || request.action === 'complete'
-          || request.action === 'release')
       const task: TeamTaskSnapshot = {
-        ...(contributed ? this.withAuthor(next, caller.id) : next),
+        ...next,
         revision: current.revision + 1,
       }
-      assertTaskCounterTransition(current, task)
       this.assertTaskGraph(state, task)
       await this.journal.appendAndFlush(root, 'team/task', { version: 1, teamId: TeamId(root.id), task })
-      return this.taskView(root, state, task, now)
+      return this.taskView(root, state, task)
     })
   }
 
@@ -370,34 +256,9 @@ export class TeamTaskBoard {
     return task.blockedBy.every(id => state.tasks.get(id)?.status === 'completed')
   }
 
-  /** Assign an owner without treating administrative assignment as contribution. */
-  private withOwner(
-    task: TeamTaskSnapshot,
-    ownerId: SessionId,
-    fields: Partial<Pick<TeamTaskSnapshot, 'leaseExpiresAt'>> = {},
-  ): TeamTaskSnapshot {
-    return {
-      ...task,
-      ...fields,
-      status: 'in_progress',
-      ownerId,
-    }
-  }
-
-  /** Append one contributor to stable task authorship. */
-  private withAuthor(task: TeamTaskSnapshot, authorId: SessionId): TeamTaskSnapshot {
-    return isTaskAuthor(task, authorId) ? task : { ...task, authorIds: [...task.authorIds, authorId] }
-  }
-
   /** Remove an optional owner field under exactOptionalPropertyTypes. */
   private withoutOwner(task: TeamTaskSnapshot): TeamTaskSnapshot {
-    const { ownerId: _ownerId, leaseExpiresAt: _leaseExpiresAt, ...without } = task
-    return without
-  }
-
-  /** Remove an optional lease field under exactOptionalPropertyTypes. */
-  private withoutLease(task: TeamTaskSnapshot): TeamTaskSnapshot {
-    const { leaseExpiresAt: _leaseExpiresAt, ...without } = task
+    const { ownerId: _ownerId, ...without } = task
     return without
   }
 
@@ -407,7 +268,7 @@ export class TeamTaskBoard {
    * new value explicitly; owner names, blocker readiness, and other task scopes
    * do not change when that snapshot is appended.
    */
-  private taskView(root: Agent, state: TeamFoldState, task: TeamTaskSnapshot, now: number): TeamTaskView {
+  private taskView(root: Agent, state: TeamFoldState, task: TeamTaskSnapshot): TeamTaskView {
     const ownerName = task.ownerId === undefined
       ? undefined
       : task.ownerId === root.id
@@ -426,14 +287,8 @@ export class TeamTaskBoard {
       subject: task.subject,
       description: task.description,
       status: task.status,
-      ...task.requiresProvider === undefined ? {} : { requiresProvider: task.requiresProvider },
-      ...task.leaseExpiresAt === undefined ? {} : { leaseExpiresAt: task.leaseExpiresAt },
-      leaseExpired: task.leaseExpiresAt !== undefined && now > task.leaseExpiresAt,
-      attempts: task.attempts,
-      stagnation: task.stagnation,
       blockedBy: structuredClone(task.blockedBy),
       writeScopes: structuredClone(task.writeScopes),
-      ...task.receipt === undefined ? {} : { receipt: structuredClone(task.receipt) },
       ...ownerName === undefined ? {} : { ownerName },
       ready: task.status === 'pending' && this.taskReady(state, task),
       writeScopeWarnings: [...warnings],

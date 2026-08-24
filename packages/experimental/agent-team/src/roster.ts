@@ -8,7 +8,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { foldSubagentDescriptor } from '@deepseek-ai/dsh-subagent'
 import type { ContinuableStart } from '@deepseek-ai/dsh-subagent'
 import { errorMessage, TeamError } from './error.ts'
-import { isActiveTeamMember, type TeamFoldState } from './fold.ts'
+import type { TeamFoldState } from './fold.ts'
 import type { TeamJournal } from './journal.ts'
 import type { TeamRuntimeLifecycle } from './lifecycle.ts'
 import { messageAccepted } from './session-message.ts'
@@ -47,7 +47,7 @@ export function resolveActiveMember(
   if (name === 'lead') return { id: root.id, name }
   const id = state.memberIdsByName.get(name)
   const member = id === undefined ? undefined : state.members.get(id)
-  if (member === undefined || !isActiveTeamMember(state, member.id)) {
+  if (member === undefined || member.phase !== 'active') {
     throw new TeamError(`active teammate "${name}" not found`, 'TEAM_MEMBER_NOT_FOUND')
   }
   return { id: member.id, name }

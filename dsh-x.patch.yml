@@ -1,5 +1,5 @@
 - insert:
-    - id: agent-team
-      name: '@deepseek-ai/dsh-experimental-agent-team'
-    - id: tool-agent-team
-      name: '@deepseek-ai/dsh-experimental-tool-agent-team'
+    - id: agent-team-gate
+      name: '@deepseek-ai/dsh-agent-team-gate'
+    - id: skill-rome
+      name: '@deepseek-ai/dsh-skill-rome'

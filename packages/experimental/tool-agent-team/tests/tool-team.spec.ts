@@ -120,15 +120,9 @@ describe('dsh-tool-team', () => {
     expect(leadPrompt).toContain('create teammates only when the user explicitly asks')
     expect(leadPrompt).toContain('FS_STALE_VERSION')
     expect(leadPrompt).toContain('Bash, formatters, code generators, and scripts are not fully protected')
-    expect(leadPrompt).toContain('renew the lease during long work')
-    expect(leadPrompt).toContain('Repeated verification failures block a task')
     expect(leadPrompt).toContain('Task readiness never starts an owner')
     expect(leadPrompt).toContain('returns noProgress immediately')
     expect(leadPrompt).toContain('Your Team role is lead')
-    const taskUpdateSchema = leadAssembly.tools.find(schema => schema.name === 'team_task_update')
-    expect(JSON.stringify(taskUpdateSchema)).toContain('"renew"')
-    expect(JSON.stringify(taskUpdateSchema)).toContain('"unblock"')
-    expect(JSON.stringify(taskUpdateSchema)).toContain('"error_sig"')
 
     const spawned = await execute(ctx, lead, 'spawn_teammate', {
       name: 'tool-worker',
@@ -218,45 +212,20 @@ describe('dsh-tool-team', () => {
     const created = await execute(ctx, lead, 'team_task_create', {
       subject: 'tool task',
       description: 'created through tool',
-      requires_provider: 'spawn',
       blocked_by: [],
       write_scopes: ['src/team'],
     })
-    const task = JSON.parse(text(created)) as { id: string; revision: number; requiresProvider?: string }
-    expect(task.requiresProvider).toBe('spawn')
+    const task = JSON.parse(text(created)) as { id: string; revision: number }
     const listed = await execute(ctx, child, 'team_task_list', { ready: true, limit: 1 })
-    expect(JSON.parse(text(listed))).toMatchObject({ tasks: [{ id: task.id, ready: true, requiresProvider: 'spawn' }] })
+    expect(JSON.parse(text(listed))).toMatchObject({ tasks: [{ id: task.id, ready: true }] })
     const read = await execute(ctx, child, 'team_task_get', { task_id: task.id })
-    expect(JSON.parse(text(read))).toMatchObject({ id: task.id, revision: 1, requiresProvider: 'spawn' })
+    expect(JSON.parse(text(read))).toMatchObject({ id: task.id, revision: 1 })
     const claimed = await execute(ctx, child, 'team_task_update', {
       task_id: task.id,
       expected_revision: task.revision,
       action: 'claim',
     })
-    const claim = JSON.parse(text(claimed)) as {
-      revision: number
-      status: string
-      ownerName: string
-      leaseExpiresAt: number
-      leaseExpired: boolean
-      attempts: number
-      stagnation: number
-    }
-    expect(claim).toMatchObject({
-      status: 'in_progress',
-      ownerName: 'json-worker',
-      leaseExpired: false,
-      attempts: 0,
-      stagnation: 0,
-    })
-    expect(Number.isSafeInteger(claim.leaseExpiresAt)).toBe(true)
-    const renewed = await execute(ctx, child, 'team_task_update', {
-      task_id: task.id,
-      expected_revision: claim.revision,
-      action: 'renew',
-    })
-    const renewal = JSON.parse(text(renewed)) as { revision: number }
-    expect(renewal).toMatchObject({ leaseExpired: false })
+    expect(JSON.parse(text(claimed))).toMatchObject({ status: 'in_progress', ownerName: 'json-worker' })
     const stale = await execute(ctx, lead, 'team_task_update', {
       task_id: task.id,
       expected_revision: task.revision,
@@ -270,31 +239,13 @@ describe('dsh-tool-team', () => {
       setTimeout(() => {
         void execute(ctx, child, 'team_task_update', {
           task_id: task.id,
-          expected_revision: renewal.revision,
+          expected_revision: 2,
           action: 'complete',
         }).then(resolve, reject)
       }, 0)
     })
     await expect(wait).resolves.toMatchObject({ isError: false })
-    const submitted = await completedCall
-    expect(JSON.parse(text(submitted))).toMatchObject({ status: 'in_review' })
-    const verified = await execute(ctx, lead, 'team_task_update', {
-      task_id: task.id,
-      expected_revision: renewal.revision + 1,
-      action: 'verify',
-      receipt: {
-        command: 'npx vitest run packages/experimental',
-        exit_code: 0,
-        git_sha: '0123456789abcdef',
-        branch: 'dsh-x/p1-gate',
-        dirty: false,
-        output_digest: 'sha256:verified',
-      },
-    })
-    expect(JSON.parse(text(verified))).toMatchObject({
-      status: 'completed',
-      receipt: { exitCode: 0, verifierName: 'lead', verifierId: lead.id },
-    })
+    expect((await completedCall).isError).toBe(false)
 
     const childInterrupt = await execute(ctx, child, 'interrupt_agent', { target: 'json-worker' })
     expect(childInterrupt.isError).toBe(true)
@@ -347,13 +298,6 @@ describe('dsh-tool-team', () => {
       write_scopes: ['src/team'],
     })
     const edit = JSON.parse(text(edited)) as { revision: number }
-    const editedSecond = await execute(ctx, lead, 'team_task_update', {
-      task_id: second.id,
-      expected_revision: second.revision,
-      action: 'edit',
-      requires_provider: 'fork',
-    })
-    expect(JSON.parse(text(editedSecond))).toMatchObject({ requiresProvider: 'fork' })
     const dependencies = await execute(ctx, lead, 'team_task_update', {
       task_id: first.id,
       expected_revision: edit.revision,

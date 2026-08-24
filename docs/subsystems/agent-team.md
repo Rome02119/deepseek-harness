@@ -54,28 +54,7 @@ interface TeamMessageSource {
 
 ## Shared task DAG
 
-Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. Claims and renewals record an absolute lease deadline. `authorIds` retains contributors in first-action order: claims, reclaims, and owner actions that renew, edit, set dependencies, complete, or release append the acting member, while Lead reassignment does not append the assignee. No contributor may verify the task; failed verification counters determine when a task becomes blocked. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
-
-```ts
-import type { SessionId } from '@deepseek-ai/dsh-session'
-
-/** Durable task lifecycle. */
-type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'blocked' | 'completed' | 'deleted'
-
-/** Durable proof that a non-author ran a gate command against a named commit. */
-interface TeamTaskReceipt {
-  readonly verifierId: SessionId
-  readonly verifierName: string
-  readonly command: string
-  readonly exitCode: number
-  readonly gitSha: string
-  readonly branch: string
-  readonly dirty: boolean
-  readonly outputDigest: string
-  readonly workerProvider?: string
-  readonly verifierProvider?: string
-}
-```
+Every task event stores a complete snapshot. `revision` is the compare-and-set value and increments by one per mutation. `blockedBy` edges must name non-deleted tasks and keep the graph acyclic. `writeScopes` are normalized advisory path prefixes rather than locks.
 
 ```ts type-equiv
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
@@ -85,24 +64,17 @@ interface TeamTaskSnapshot {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
-  readonly requiresProvider?: string
   readonly ownerId?: SessionId
-  readonly authorIds: SessionId[]
-  readonly leaseExpiresAt?: number
-  readonly attempts: number
-  readonly lastErrorSig?: string
-  readonly stagnation: number
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
-  readonly receipt?: TeamTaskReceipt
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `in_review` awaits independent verification, `blocked` is an unowned verification-failure stop, `completed` satisfies blockers, and `deleted` is a retained tombstone. Verification records its gate result in `receipt`. Views add owner name, lease expiry, readiness, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
 
 ## Replay
 
-`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Replay carries `leaseExpiresAt` without consulting the current clock, requires `authorIds` to preserve its prior prefix, and rejects verification-counter decreases except the exact zero reset on unblock; task views derive expiry when read. Roster and task reads reach callers as views that add owner name, lease expiry, readiness, and write-scope warnings, while pending mail stays internal to delivery and recovery. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
+`foldTeam()` replays one root Session into the roster, task board, and queued-minus-delivered mailbox that every Team operation reads. It selects records by `TeamId`, so events inherited by an ordinary fork retain the ancestor id and never enter the new root's state. Session event `seq` and `time` remain the ordering and timing record; Team snapshots do not duplicate them. Roster and task reads reach callers as views that add owner name, readiness, and write-scope warnings, while pending mail stays internal to delivery and recovery. The package [README](../../packages/experimental/agent-team/README.md) owns operation, authorization, recovery, and limit behavior.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -207,5 +179,5 @@ tryMembership(agent: Agent): TeamMembership | undefined
 
 Types: [Agent](core.md)
 
-Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
+Source: [`packages/extensions/agent-team-gate/src/index.ts`](../../packages/extensions/agent-team-gate/src/index.ts)
 <!-- END GENERATED cordis-surface -->

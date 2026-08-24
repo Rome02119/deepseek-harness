@@ -3,7 +3,6 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { TeamActivity } from './activity.ts'
 import { errorMessage, TeamError } from './error.ts'
@@ -26,14 +25,12 @@ import type {
   TeamWaitResult,
   UpdateTeamTaskRequest,
 } from './types.ts'
-import { assertWriteScope } from './write-scope.ts'
 
 export type * from './types.ts'
 export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
-export { foldTeam, isVerifierSameProvider, satisfiesTaskProvider } from './fold.ts'
-export { assertWriteScope, isPathInScope, normalizeRelativePath } from './write-scope.ts'
+export { foldTeam } from './fold.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -43,7 +40,6 @@ declare module '@deepseek-ai/cordis' {
 
 const DEFAULT_MAX_MEMBERS = 8
 const DEFAULT_MAX_TASKS = 256
-const DEFAULT_LEASE_DURATION_MS = 15 * 60 * 1_000
 const DEFAULT_MAX_PENDING_MESSAGES = 64
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
@@ -63,7 +59,6 @@ export class TeamService extends Service {
   static Config: z<Config> = z.object({
     maxMembers: z.number().step(1).min(1).default(DEFAULT_MAX_MEMBERS),
     maxTasks: z.number().step(1).min(1).default(DEFAULT_MAX_TASKS),
-    leaseDurationMs: z.number().step(1).min(1).default(DEFAULT_LEASE_DURATION_MS),
     maxPendingMessagesPerMember: z.number().step(1).min(1).default(DEFAULT_MAX_PENDING_MESSAGES),
     maxMessageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_BYTES),
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
@@ -84,10 +79,6 @@ export class TeamService extends Service {
     this.config = {
       maxMembers: positiveLimit('maxMembers', config.maxMembers ?? DEFAULT_MAX_MEMBERS),
       maxTasks: positiveLimit('maxTasks', config.maxTasks ?? DEFAULT_MAX_TASKS),
-      leaseDurationMs: positiveLimit(
-        'leaseDurationMs',
-        config.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS,
-      ),
       maxPendingMessagesPerMember: positiveLimit(
         'maxPendingMessagesPerMember',
         config.maxPendingMessagesPerMember ?? DEFAULT_MAX_PENDING_MESSAGES,
@@ -111,7 +102,7 @@ export class TeamService extends Service {
       this.config.maxPendingMessagesPerMember,
       this.config.maxMessageBytes,
     )
-    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks, this.config.leaseDurationMs)
+    this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks)
 
     ctx.on('session/event', (session, event) => { this.mailbox.observeSessionEvent(session, event) })
     ctx.on('agent/session-start', ({ agent }) => { this.scheduleRecovery(agent) })
@@ -119,14 +110,6 @@ export class TeamService extends Service {
       const membership = this.roster.tryMembership(agent)
       if (membership !== undefined) this.activity.notify(membership.id)
     })
-    ctx.on('fs/write-intent', async (target, _actor, next) => {
-      await assertWriteScope(ctx, this.roster, this.journal, target)
-      return await next()
-    }, { prepend: true })
-    ctx.on('fs/edit-intent', async (target, _actor, next) => {
-      await assertWriteScope(ctx, this.roster, this.journal, target)
-      return await next()
-    }, { prepend: true })
     ctx.effect(() => () => this.disposeRuntime(), 'agentTeams.runtimeLifecycle()')
     for (const agent of ctx.agents.list()) this.scheduleRecovery(agent)
   }

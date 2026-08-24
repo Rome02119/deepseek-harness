@@ -91,7 +91,7 @@ async function setup(ctx: Context, storageRoot: string) {
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
   await ctx.plugin(SubagentFork, { providerName: 'fork' })
   await ctx.plugin(TeamService, { leaseDurationMs: 1_000 })
-  ctx.llm.registerAdapter(['mock'], new MockAdapter(['hang', 'hang']))
+  ctx.llm.registerAdapter(['mock'], new MockAdapter(['hang', 'hang', 'hang']))
   const lead = ctx.agentLoop.create(SessionId('lead'), { provider: 'mock', model: 'mock' })
   const workerMember = await ctx.agentTeams.spawnTeammate(lead, {
     name: 'worker',

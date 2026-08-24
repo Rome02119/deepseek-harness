@@ -11,7 +11,6 @@ import type {
   TeamMessageSnapshot,
   TeamTaskId,
   TeamTaskSnapshot,
-  TeamTaskStatus,
 } from './types.ts'
 import {
   TeamId as toTeamId,
@@ -30,14 +29,6 @@ const teamTaskIdSchema = z.string().min(1).refine((value) => {
   return match === null || Number.isSafeInteger(Number(match[1]))
 }, { message: 'numeric task id suffix must be a safe integer' }).transform(value => toTeamTaskId(value))
 const teamMessageIdSchema = z.string().min(1).transform(value => toTeamMessageId(value))
-const teamTaskTransitions: Record<TeamTaskStatus, readonly TeamTaskStatus[]> = {
-  pending: ['pending', 'in_progress', 'deleted'],
-  in_progress: ['in_progress', 'in_review', 'pending', 'deleted'],
-  in_review: ['in_review', 'completed', 'pending', 'blocked', 'deleted'],
-  blocked: ['pending', 'deleted'],
-  completed: ['completed', 'pending', 'deleted'],
-  deleted: [],
-}
 
 const coreContentBlockTypes = new Set(['text', 'reasoning', 'image', 'tool-call', 'tool-result'])
 const imageAttachmentSchema = z.object({
@@ -83,38 +74,15 @@ const teamMemberSnapshotSchema = z.object({
   error: z.string().optional(),
 }).strict() as z.ZodType<TeamMemberSnapshot>
 
-const teamTaskReceiptSchema = z.object({
-  verifierId: sessionIdSchema,
-  verifierName: z.string(),
-  command: z.string(),
-  exitCode: z.number(),
-  gitSha: z.string(),
-  branch: z.string(),
-  dirty: z.boolean(),
-  outputDigest: z.string(),
-  workerProvider: z.string().optional(),
-  verifierProvider: z.string().optional(),
-}).strict()
-
 const teamTaskSnapshotSchema = z.object({
   id: teamTaskIdSchema,
   revision: positiveSafeInteger,
   subject: z.string(),
   description: z.string(),
-  status: z.enum(['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted']),
-  requiresProvider: z.string().optional(),
+  status: z.enum(['pending', 'in_progress', 'completed', 'deleted']),
   ownerId: sessionIdSchema.optional(),
-  authorIds: z.array(sessionIdSchema).refine(
-    ids => new Set(ids).size === ids.length,
-    { message: 'task author ids must not repeat' },
-  ),
-  leaseExpiresAt: positiveSafeInteger.optional(),
-  attempts: nonNegativeSafeInteger.default(0),
-  lastErrorSig: z.string().optional(),
-  stagnation: nonNegativeSafeInteger.default(0),
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
-  receipt: teamTaskReceiptSchema.optional(),
 }).strict() as z.ZodType<TeamTaskSnapshot>
 
 const teamMessageSnapshotSchema = z.object({
@@ -182,91 +150,6 @@ export function emptyTeamFoldState(rootId: SessionId): TeamFoldState {
     delivered: new Set(),
     nextTaskNumber: 1,
   }
-}
-
-/**
- * Test whether an id is the Team Lead or an active durable roster member.
- * @param state - current Team fold.
- * @param memberId - candidate member Session id.
- * @returns whether the id may act as an active Team member.
- */
-export function isActiveTeamMember(state: TeamFoldState, memberId: SessionId): boolean {
-  return state.id === toTeamId(memberId) || state.members.get(memberId)?.phase === 'active'
-}
-
-/**
- * Test whether a member has contributed to a task.
- * @param task - task with durable authorship history.
- * @param memberId - candidate verifier Session id.
- * @returns whether the member contributed to the task.
- */
-export function isTaskAuthor(
-  task: Pick<TeamTaskSnapshot, 'authorIds'>,
-  memberId: SessionId,
-): boolean {
-  return task.authorIds.includes(memberId)
-}
-
-/**
- * Require failure counters to increase monotonically except when unblocking.
- * @param prior - task snapshot before the transition.
- * @param task - candidate next task snapshot.
- */
-export function assertTaskCounterTransition(
-  prior: Pick<TeamTaskSnapshot, 'status' | 'attempts' | 'stagnation'>,
-  task: Pick<TeamTaskSnapshot, 'id' | 'status' | 'attempts' | 'stagnation'>,
-): void {
-  const unblocking = prior.status === 'blocked' && task.status === 'pending'
-  for (const field of ['attempts', 'stagnation'] as const) {
-    if (unblocking ? task[field] !== 0 : task[field] < prior[field]) {
-      throw new Error(`team task "${task.id}" ${unblocking ? 'unblocked without resetting' : 'lowered'} ${field}`)
-    }
-  }
-}
-
-/**
- * Whether durable verification failure counters require a blocked task.
- * @param task - current failed-verification counters.
- * @returns whether either automatic blocking cap has been reached.
- */
-export function isTaskVerificationBlocked(
-  task: Pick<TeamTaskSnapshot, 'attempts' | 'stagnation'>,
-): boolean {
-  return task.attempts >= 5 || task.stagnation >= 3
-}
-
-/**
- * Test whether a candidate verifier shares a recorded roster provider with any task author.
- * @param state - current Team fold containing recorded member providers.
- * @param task - task with durable authorship history.
- * @param verifierId - candidate verifier Session id.
- * @returns whether the verifier shares a recorded provider with an author.
- */
-export function isVerifierSameProvider(
-  state: TeamFoldState,
-  task: Pick<TeamTaskSnapshot, 'authorIds'>,
-  verifierId: SessionId,
-): boolean {
-  const verifierProvider = state.members.get(verifierId)?.provider
-  if (verifierProvider === undefined) return false
-  return task.authorIds.some(authorId => state.members.get(authorId)?.provider === verifierProvider)
-}
-
-/**
- * Test whether a member satisfies a task's declared provider requirement.
- * A task with no requiresProvider constraint is unrestricted.
- * @param state - current Team fold containing recorded member providers.
- * @param task - task snapshot carrying optional required provider.
- * @param memberId - candidate owner Session id.
- * @returns whether the member's roster provider matches the requirement.
- */
-export function satisfiesTaskProvider(
-  state: TeamFoldState,
-  task: Pick<TeamTaskSnapshot, 'requiresProvider'>,
-  memberId: SessionId,
-): boolean {
-  if (task.requiresProvider === undefined) return true
-  return state.members.get(memberId)?.provider === task.requiresProvider
 }
 
 /** Whether one event belongs to the Team domain. */
@@ -362,60 +245,6 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
       }
       if (prior !== undefined && task.revision !== prior.revision + 1) {
         throw new Error(`team task "${task.id}" revision is not contiguous`)
-      }
-      const priorStatus = prior?.status
-      if (priorStatus === undefined ? task.status !== 'pending' : !teamTaskTransitions[priorStatus].includes(task.status)) {
-        throw new Error(`team task "${task.id}" has an invalid ${priorStatus ?? 'new'} -> ${task.status} transition`)
-      }
-      if (prior !== undefined) {
-        if (!prior.authorIds.every((id, index) => task.authorIds[index] === id)) {
-          throw new Error(`team task "${task.id}" changed prior authorIds`)
-        }
-        const appendedAuthorId = task.authorIds[prior.authorIds.length]
-        const extraAuthorId = task.authorIds[prior.authorIds.length + 1]
-        if (extraAuthorId !== undefined) {
-          throw new Error(`team task "${task.id}" appended more than one authorId; offending id "${extraAuthorId}"`)
-        }
-        if (appendedAuthorId !== undefined
-          && appendedAuthorId !== prior.ownerId && appendedAuthorId !== task.ownerId) {
-          throw new Error(`team task "${task.id}" appended authorId "${appendedAuthorId}" without prior or next ownership`)
-        }
-        assertTaskCounterTransition(prior, task)
-      }
-      if (task.ownerId !== undefined && !satisfiesTaskProvider(state, task, task.ownerId)) {
-        throw new Error(`team task "${task.id}" assigned to member "${task.ownerId}" violating requiresProvider`)
-      }
-      if (task.status === 'blocked') {
-        if (!isTaskVerificationBlocked(task)) {
-          throw new Error(`team task "${task.id}" blocked below the verification failure cap`)
-        }
-        if (task.ownerId !== undefined) throw new Error(`team task "${task.id}" blocked with an owner`)
-        if (task.receipt === undefined || task.receipt.exitCode === 0) {
-          throw new Error(`team task "${task.id}" blocked without a failing receipt`)
-        }
-      }
-      if (priorStatus === 'in_review' && task.status === 'pending'
-        && task.receipt?.exitCode !== undefined && task.receipt.exitCode !== 0
-        && isTaskVerificationBlocked(task)) {
-        throw new Error(`team task "${task.id}" remained pending at the verification failure cap`)
-      }
-      if (priorStatus === 'blocked' && task.status === 'pending' && task.ownerId !== undefined) {
-        throw new Error(`team task "${task.id}" unblocked without resetting ownership`)
-      }
-      if (task.status === 'completed') {
-        const receipt = task.receipt
-        if (receipt === undefined) throw new Error(`team task "${task.id}" completed without a receipt`)
-        if (receipt.exitCode !== 0) throw new Error(`team task "${task.id}" completed with a failing receipt`)
-        if (receipt.dirty) throw new Error(`team task "${task.id}" completed with a dirty receipt`)
-        if (isTaskAuthor(task, receipt.verifierId)) {
-          throw new Error(`team task "${task.id}" was verified by one of its authors`)
-        }
-        if (isVerifierSameProvider(state, task, receipt.verifierId)) {
-          throw new Error(`team task "${task.id}" was verified by its worker provider`)
-        }
-        if (!isActiveTeamMember(state, receipt.verifierId)) {
-          throw new Error(`team task "${task.id}" was verified by inactive or unknown member "${receipt.verifierId}"`)
-        }
       }
       assertTaskGraphCandidate(state.tasks, task)
       const match = numericTaskIdPattern.exec(task.id)

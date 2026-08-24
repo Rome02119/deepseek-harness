@@ -57,9 +57,6 @@ describe('Agent Teams stream invariant', () => {
           subject: 'invalid dependency',
           description: 'references a missing blocker',
           status: 'pending',
-          authorIds: [],
-          attempts: 0,
-          stagnation: 0,
           blockedBy: [TeamTaskId('missing')],
           writeScopes: [],
         },
@@ -69,43 +66,5 @@ describe('Agent Teams stream invariant', () => {
       packageName: '@deepseek-ai/dsh-experimental-agent-team',
     }))
     expect(session.events).toEqual([])
-  })
-
-  it('accepts an in-review task with a verification receipt', async () => {
-    const ctx = await setup()
-    const session = ctx.sessions.create(SessionId('team-task-review-invariant'))
-    const receipt = {
-      verifierId: SessionId('verifier'),
-      verifierName: 'verifier',
-      command: 'pnpm test',
-      exitCode: 0,
-      gitSha: '0123456789abcdef',
-      branch: 'feature',
-      dirty: false,
-      outputDigest: 'sha256:verified',
-    }
-
-    expect(() => {
-      const teamId = TeamId(session.id)
-      const task = {
-        id: TeamTaskId('task-1'),
-        subject: 'review',
-        description: 'awaiting verification',
-        ownerId: SessionId('author'),
-        authorIds: [SessionId('author')],
-        attempts: 0,
-        stagnation: 0,
-        blockedBy: [],
-        writeScopes: [],
-      }
-      session.append('team/task', { version: 1, teamId, task: { ...task, revision: 1, status: 'pending' } })
-      session.append('team/task', { version: 1, teamId, task: { ...task, revision: 2, status: 'in_progress' } })
-      session.append('team/task', {
-        version: 1,
-        teamId,
-        task: { ...task, revision: 3, status: 'in_review', receipt },
-      })
-    }).not.toThrow()
-    expect(session.events[2]?.data).toMatchObject({ task: { status: 'in_review', receipt } })
   })
 })

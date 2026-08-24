@@ -1,0 +1,472 @@
+/** Strict replay fold for Agent Teams log-only events. */
+
+import { z } from 'zod'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type {
+  TeamId,
+  TeamMemberSnapshot,
+  TeamMessageId,
+  TeamMessageSnapshot,
+  TeamSessionEventMap,
+  TeamTaskId,
+  TeamTaskSnapshot,
+  TeamTaskStatus,
+} from './types.ts'
+import {
+  TeamId as toTeamId,
+  TeamMessageId as toTeamMessageId,
+  TeamTaskId as toTeamTaskId,
+} from './types.ts'
+import { assertTaskGraphCandidate } from './task-graph.ts'
+
+const nonNegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+const positiveSafeInteger = nonNegativeSafeInteger.min(1)
+const sessionIdSchema = z.string().min(1).transform((value: string) => SessionId(value))
+const teamIdSchema = z.string().min(1).transform((value: string) => toTeamId(value))
+const numericTaskIdPattern = /^task-(\d+)$/u
+const teamTaskIdSchema = z.string().min(1).refine((value: string) => {
+  const match = numericTaskIdPattern.exec(value)
+  return match === null || Number.isSafeInteger(Number(match[1]))
+}, { message: 'numeric task id suffix must be a safe integer' }).transform((value: string) => toTeamTaskId(value))
+const teamMessageIdSchema = z.string().min(1).transform((value: string) => toTeamMessageId(value))
+const teamTaskTransitions: Record<TeamTaskStatus, readonly TeamTaskStatus[]> = {
+  pending: ['pending', 'in_progress', 'deleted'],
+  in_progress: ['in_progress', 'in_review', 'pending', 'deleted'],
+  in_review: ['in_review', 'completed', 'pending', 'blocked', 'deleted'],
+  blocked: ['pending', 'deleted'],
+  completed: ['completed', 'pending', 'deleted'],
+  deleted: [],
+}
+
+const coreContentBlockTypes = new Set(['text', 'reasoning', 'image', 'tool-call', 'tool-result'])
+const imageAttachmentSchema = z.object({
+  attachmentId: z.string().min(1),
+  mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  bytes: nonNegativeSafeInteger,
+  width: positiveSafeInteger,
+  height: positiveSafeInteger,
+  name: z.string().optional(),
+}).strict()
+
+// ContentBlockMap is merge-extensible. Validate every core variant exactly,
+// while retaining JSON-decoded plugin variants under an unknown type tag.
+const contentBlockSchema: z.ZodType<ContentBlock> = z.lazy(() => z.union([
+  z.object({ type: z.literal('text'), text: z.string() }).strict(),
+  z.object({ type: z.literal('reasoning'), text: z.string() }).strict(),
+  z.object({ type: z.literal('image'), attachment: imageAttachmentSchema }).strict(),
+  z.object({
+    type: z.literal('tool-call'),
+    id: z.string().min(1),
+    name: z.string(),
+    arguments: z.string(),
+  }).strict(),
+  z.object({
+    type: z.literal('tool-result'),
+    toolCallId: z.string().min(1),
+    content: z.array(contentBlockSchema),
+    isError: z.boolean().optional(),
+  }).strict(),
+  z.object({ type: z.string().min(1) }).loose().refine(
+    (block: { type: string }) => !coreContentBlockTypes.has(block.type),
+    { message: 'known content block types must match their declared fields' },
+  ),
+])) as z.ZodType<ContentBlock>
+
+const teamMemberSnapshotSchema = z.object({
+  id: sessionIdSchema,
+  name: z.string(),
+  description: z.string(),
+  provider: z.string(),
+  context: z.enum(['fresh', 'fork']),
+  phase: z.enum(['provisioning', 'active', 'failed']),
+  error: z.string().optional(),
+}).strict() as z.ZodType<TeamMemberSnapshot>
+
+const teamTaskReceiptSchema = z.object({
+  verifierId: sessionIdSchema,
+  verifierName: z.string(),
+  command: z.string(),
+  exitCode: z.number(),
+  gitSha: z.string(),
+  branch: z.string(),
+  dirty: z.boolean(),
+  outputDigest: z.string(),
+  workerProvider: z.string().optional(),
+  verifierProvider: z.string().optional(),
+}).strict()
+
+const teamTaskSnapshotSchema = z.object({
+  id: teamTaskIdSchema,
+  revision: positiveSafeInteger,
+  subject: z.string(),
+  description: z.string(),
+  status: z.enum(['pending', 'in_progress', 'in_review', 'blocked', 'completed', 'deleted']),
+  requiresProvider: z.string().optional(),
+  ownerId: sessionIdSchema.optional(),
+  authorIds: z.array(sessionIdSchema).refine(
+    (ids: SessionId[]) => new Set(ids).size === ids.length,
+    { message: 'task author ids must not repeat' },
+  ),
+  leaseExpiresAt: positiveSafeInteger.optional(),
+  attempts: nonNegativeSafeInteger.default(0),
+  lastErrorSig: z.string().optional(),
+  stagnation: nonNegativeSafeInteger.default(0),
+  blockedBy: z.array(teamTaskIdSchema),
+  writeScopes: z.array(z.string()),
+  receipt: teamTaskReceiptSchema.optional(),
+}).strict() as z.ZodType<TeamTaskSnapshot>
+
+const teamMessageSnapshotSchema = z.object({
+  id: teamMessageIdSchema,
+  senderId: sessionIdSchema,
+  senderName: z.string(),
+  targetId: sessionIdSchema,
+  delivery: z.enum(['quiet', 'wakeup']),
+  content: z.array(contentBlockSchema),
+}).strict() as z.ZodType<TeamMessageSnapshot>
+
+const teamEventSelectorSchema: z.ZodType<{ version: number; teamId: TeamId }> = z.object({
+  version: nonNegativeSafeInteger,
+  teamId: teamIdSchema,
+}).loose()
+
+const teamMemberEventSchema = z.object({
+  version: z.literal(1),
+  teamId: teamIdSchema,
+  member: teamMemberSnapshotSchema,
+}).strict() as z.ZodType<TeamSessionEventMap['team/member']>
+
+const teamTaskEventSchema = z.object({
+  version: z.literal(1),
+  teamId: teamIdSchema,
+  task: teamTaskSnapshotSchema,
+}).strict() as z.ZodType<TeamSessionEventMap['team/task']>
+
+const teamMessageQueuedEventSchema = z.object({
+  version: z.literal(1),
+  teamId: teamIdSchema,
+  message: teamMessageSnapshotSchema,
+}).strict() as z.ZodType<TeamSessionEventMap['team/message/queued']>
+
+const teamMessageDeliveredEventSchema = z.object({
+  version: z.literal(1),
+  teamId: teamIdSchema,
+  messageId: teamMessageIdSchema,
+  targetId: sessionIdSchema,
+}).strict() as z.ZodType<TeamSessionEventMap['team/message/delivered']>
+
+/** Mutable internal replay state. */
+export interface TeamFoldState {
+  readonly id: TeamId
+  readonly members: Map<SessionId, TeamMemberSnapshot>
+  readonly memberIdsByName: Map<string, SessionId>
+  readonly tasks: Map<TeamTaskId, TeamTaskSnapshot>
+  readonly messages: Map<TeamMessageId, TeamMessageSnapshot>
+  readonly delivered: Set<TeamMessageId>
+  nextTaskNumber: number
+}
+
+/**
+ * Construct an empty Team fold for one root Session.
+ * @param rootId - Session whose TeamId selects applicable records.
+ * @returns mutable empty replay state.
+ */
+export function emptyTeamFoldState(rootId: SessionId): TeamFoldState {
+  return {
+    id: toTeamId(rootId),
+    members: new Map(),
+    memberIdsByName: new Map(),
+    tasks: new Map(),
+    messages: new Map(),
+    delivered: new Set(),
+    nextTaskNumber: 1,
+  }
+}
+
+/**
+ * Test whether an id is the Team Lead or an active durable roster member.
+ * @param state - current Team fold.
+ * @param memberId - candidate member Session id.
+ * @returns whether the id may act as an active Team member.
+ */
+export function isActiveTeamMember(state: TeamFoldState, memberId: SessionId): boolean {
+  return state.id === toTeamId(memberId) || state.members.get(memberId)?.phase === 'active'
+}
+
+/**
+ * Test whether a member has contributed to a task.
+ * @param task - task with durable authorship history.
+ * @param memberId - candidate verifier Session id.
+ * @returns whether the member contributed to the task.
+ */
+export function isTaskAuthor(
+  task: Pick<TeamTaskSnapshot, 'authorIds'>,
+  memberId: SessionId,
+): boolean {
+  return task.authorIds.includes(memberId)
+}
+
+/**
+ * Require failure counters to increase monotonically except when unblocking.
+ * @param prior - task snapshot before the transition.
+ * @param task - candidate next task snapshot.
+ */
+export function assertTaskCounterTransition(
+  prior: Pick<TeamTaskSnapshot, 'status' | 'attempts' | 'stagnation'>,
+  task: Pick<TeamTaskSnapshot, 'id' | 'status' | 'attempts' | 'stagnation'>,
+): void {
+  const unblocking = prior.status === 'blocked' && task.status === 'pending'
+  for (const field of ['attempts', 'stagnation'] as const) {
+    if (unblocking ? task[field] !== 0 : task[field] < prior[field]) {
+      throw new Error(`team task "${task.id}" ${unblocking ? 'unblocked without resetting' : 'lowered'} ${field}`)
+    }
+  }
+}
+
+/**
+ * Whether durable verification failure counters require a blocked task.
+ * @param task - current failed-verification counters.
+ * @returns whether either automatic blocking cap has been reached.
+ */
+export function isTaskVerificationBlocked(
+  task: Pick<TeamTaskSnapshot, 'attempts' | 'stagnation'>,
+): boolean {
+  return task.attempts >= 5 || task.stagnation >= 3
+}
+
+/**
+ * Test whether a candidate verifier shares a recorded roster provider with any task author.
+ * @param state - current Team fold containing recorded member providers.
+ * @param task - task with durable authorship history.
+ * @param verifierId - candidate verifier Session id.
+ * @returns whether the verifier shares a recorded provider with an author.
+ */
+export function isVerifierSameProvider(
+  state: TeamFoldState,
+  task: Pick<TeamTaskSnapshot, 'authorIds'>,
+  verifierId: SessionId,
+): boolean {
+  const verifierProvider = state.members.get(verifierId)?.provider
+  if (verifierProvider === undefined) return false
+  return task.authorIds.some(authorId => state.members.get(authorId)?.provider === verifierProvider)
+}
+
+/**
+ * Test whether a member satisfies a task's declared provider requirement.
+ * A task with no requiresProvider constraint is unrestricted.
+ * @param state - current Team fold containing recorded member providers.
+ * @param task - task snapshot carrying optional required provider.
+ * @param memberId - candidate owner Session id.
+ * @returns whether the member's roster provider matches the requirement.
+ */
+export function satisfiesTaskProvider(
+  state: TeamFoldState,
+  task: Pick<TeamTaskSnapshot, 'requiresProvider'>,
+  memberId: SessionId,
+): boolean {
+  if (task.requiresProvider === undefined) return true
+  return state.members.get(memberId)?.provider === task.requiresProvider
+}
+
+/** Whether one event belongs to the Team domain. */
+export type TeamEventType =
+  | 'team/member'
+  | 'team/task'
+  | 'team/message/queued'
+  | 'team/message/delivered'
+
+/** One event owned by the Team domain. */
+export type TeamSessionEvent = {
+  type: TeamEventType
+  seq: number
+  time: number
+  data: unknown
+  ignorable?: true
+}
+
+/**
+ * Test whether a Session event belongs to the Team domain.
+ * @param event - candidate Session event.
+ * @returns whether the event has a Team-owned type.
+ */
+export function isTeamEvent(event: SessionEvent): boolean {
+  const type = event.type as string
+  return type === 'team/member'
+    || type === 'team/task'
+    || type === 'team/message/queued'
+    || type === 'team/message/delivered'
+}
+
+/** Decode one persisted Team value and retain the schema failure as its cause. */
+function parsePersisted<T>(type: TeamEventType, schema: z.ZodType<T>, value: unknown): T {
+  try {
+    return schema.parse(value)
+  } catch (error: unknown) {
+    throw new Error(`persisted Agent Teams ${type} payload is invalid`, { cause: error })
+  }
+}
+
+/** Decode the complete current-version payload selected by one Team event type. */
+function parseCurrentTeamEvent(event: TeamSessionEvent): {
+  [K in TeamEventType]: { type: K; data: TeamSessionEventMap[K] }
+}[TeamEventType] {
+  switch (event.type) {
+    case 'team/member':
+      return { type: 'team/member', data: parsePersisted(event.type, teamMemberEventSchema, event.data) }
+    case 'team/task':
+      return { type: 'team/task', data: parsePersisted(event.type, teamTaskEventSchema, event.data) }
+    case 'team/message/queued':
+      return { type: 'team/message/queued', data: parsePersisted(event.type, teamMessageQueuedEventSchema, event.data) }
+    case 'team/message/delivered':
+      return { type: 'team/message/delivered', data: parsePersisted(event.type, teamMessageDeliveredEventSchema, event.data) }
+    default:
+      return event as never
+  }
+}
+
+/**
+ * Apply one event, ignoring Team records inherited by a different root fork.
+ * @param state - mutable Team replay state.
+ * @param event - next contiguous Session event.
+ */
+export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void {
+  if (!isTeamEvent(event)) return
+  const teamEvent = event as unknown as TeamSessionEvent
+  const selector = parsePersisted(teamEvent.type, teamEventSelectorSchema, teamEvent.data)
+  if (selector.version !== 1) {
+    if (selector.teamId !== state.id) return
+    throw new Error(`unsupported Agent Teams event version ${String(selector.version)}`)
+  }
+  const decoded = parseCurrentTeamEvent(teamEvent)
+  if (decoded.data.teamId !== state.id) return
+
+  switch (decoded.type) {
+    case 'team/member': {
+      const member = decoded.data.member
+      const prior = state.members.get(member.id)
+      const named = state.memberIdsByName.get(member.name)
+      if (named !== undefined && named !== member.id) {
+        throw new Error(`teammate name "${member.name}" is reused by another member`)
+      }
+      if (prior === undefined) {
+        if (member.phase !== 'provisioning') throw new Error(`teammate "${member.name}" must begin provisioning`)
+        state.memberIdsByName.set(member.name, member.id)
+      } else {
+        if (prior.name !== member.name || prior.provider !== member.provider || prior.context !== member.context) {
+          throw new Error(`teammate "${member.id}" changed immutable identity fields`)
+        }
+        if (prior.phase !== 'provisioning' || member.phase === 'provisioning') {
+          throw new Error(`teammate "${member.name}" has an invalid ${prior.phase} -> ${member.phase} transition`)
+        }
+      }
+      state.members.set(member.id, member)
+      break
+    }
+    case 'team/task': {
+      const task = decoded.data.task
+      const prior = state.tasks.get(task.id)
+      if (prior === undefined && task.revision !== 1) {
+        throw new Error(`team task "${task.id}" must begin at revision 1`)
+      }
+      if (prior !== undefined && task.revision !== prior.revision + 1) {
+        throw new Error(`team task "${task.id}" revision is not contiguous`)
+      }
+      const priorStatus = prior?.status
+      if (priorStatus === undefined ? task.status !== 'pending' : !teamTaskTransitions[priorStatus].includes(task.status)) {
+        throw new Error(`team task "${task.id}" has an invalid ${priorStatus ?? 'new'} -> ${task.status} transition`)
+      }
+      if (prior !== undefined) {
+        if (!prior.authorIds.every((id, index) => task.authorIds[index] === id)) {
+          throw new Error(`team task "${task.id}" changed prior authorIds`)
+        }
+        const appendedAuthorId = task.authorIds[prior.authorIds.length]
+        const extraAuthorId = task.authorIds[prior.authorIds.length + 1]
+        if (extraAuthorId !== undefined) {
+          throw new Error(`team task "${task.id}" appended more than one authorId; offending id "${extraAuthorId}"`)
+        }
+        if (appendedAuthorId !== undefined
+          && appendedAuthorId !== prior.ownerId && appendedAuthorId !== task.ownerId) {
+          throw new Error(`team task "${task.id}" appended authorId "${appendedAuthorId}" without prior or next ownership`)
+        }
+        assertTaskCounterTransition(prior, task)
+      }
+      if (task.ownerId !== undefined && !satisfiesTaskProvider(state, task, task.ownerId)) {
+        throw new Error(`team task "${task.id}" assigned to member "${task.ownerId}" violating requiresProvider`)
+      }
+      if (task.status === 'blocked') {
+        if (!isTaskVerificationBlocked(task)) {
+          throw new Error(`team task "${task.id}" blocked below the verification failure cap`)
+        }
+        if (task.ownerId !== undefined) throw new Error(`team task "${task.id}" blocked with an owner`)
+        if (task.receipt === undefined || task.receipt.exitCode === 0) {
+          throw new Error(`team task "${task.id}" blocked without a failing receipt`)
+        }
+      }
+      if (priorStatus === 'in_review' && task.status === 'pending'
+        && task.receipt?.exitCode !== undefined && task.receipt.exitCode !== 0
+        && isTaskVerificationBlocked(task)) {
+        throw new Error(`team task "${task.id}" remained pending at the verification failure cap`)
+      }
+      if (priorStatus === 'blocked' && task.status === 'pending' && task.ownerId !== undefined) {
+        throw new Error(`team task "${task.id}" unblocked without resetting ownership`)
+      }
+      if (task.status === 'completed') {
+        const receipt = task.receipt
+        if (receipt === undefined) throw new Error(`team task "${task.id}" completed without a receipt`)
+        if (receipt.exitCode !== 0) throw new Error(`team task "${task.id}" completed with a failing receipt`)
+        if (receipt.dirty) throw new Error(`team task "${task.id}" completed with a dirty receipt`)
+        if (isTaskAuthor(task, receipt.verifierId)) {
+          throw new Error(`team task "${task.id}" was verified by one of its authors`)
+        }
+        if (isVerifierSameProvider(state, task, receipt.verifierId)) {
+          throw new Error(`team task "${task.id}" was verified by its worker provider`)
+        }
+        if (!isActiveTeamMember(state, receipt.verifierId)) {
+          throw new Error(`team task "${task.id}" was verified by inactive or unknown member "${receipt.verifierId}"`)
+        }
+      }
+      assertTaskGraphCandidate(state.tasks, task)
+      const match = numericTaskIdPattern.exec(task.id)
+      if (match !== null) {
+        const number = Number(match[1])
+        state.nextTaskNumber = Math.max(
+          state.nextTaskNumber,
+          number === Number.MAX_SAFE_INTEGER ? number : number + 1,
+        )
+      }
+      state.tasks.set(task.id, task)
+      break
+    }
+    case 'team/message/queued': {
+      const message = decoded.data.message
+      if (state.messages.has(message.id)) throw new Error(`team message "${message.id}" was queued twice`)
+      state.messages.set(message.id, message)
+      break
+    }
+    case 'team/message/delivered': {
+      const queued = state.messages.get(decoded.data.messageId)
+      if (queued === undefined) throw new Error(`team message "${decoded.data.messageId}" was delivered before queueing`)
+      if (queued.targetId !== decoded.data.targetId) throw new Error(`team message "${decoded.data.messageId}" target changed`)
+      if (state.delivered.has(decoded.data.messageId)) throw new Error(`team message "${decoded.data.messageId}" was delivered twice`)
+      state.delivered.add(decoded.data.messageId)
+      break
+    }
+    /* v8 ignore next 2 -- TeamEventType is closed and every member is handled above. */
+    default:
+      return
+  }
+}
+
+/**
+ * Replay one root Session into its current Team state.
+ * @param rootId - root Session identity selecting Team-owned records.
+ * @param events - complete contiguous Session log.
+ * @returns mutable replay state at the end of the log.
+ */
+export function foldTeam(rootId: SessionId, events: readonly SessionEvent[]): TeamFoldState {
+  const state = emptyTeamFoldState(rootId)
+  for (const event of events) applyTeamEvent(state, event)
+  return state
+}

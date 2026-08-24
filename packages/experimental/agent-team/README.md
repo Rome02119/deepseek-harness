@@ -12,13 +12,12 @@ Implicit-root Agent Teams domain. `ctx.agentTeams` owns a flat Lead/teammate ros
   config:
     maxMembers: 8
     maxTasks: 256
-    leaseDurationMs: 900000
     maxPendingMessagesPerMember: 64
     maxMessageBytes: 65536
     disposalTimeoutMs: 5000
 ```
 
-Every limit must be a positive safe integer. `maxMembers` counts every name ever provisioned, including failed members, because names are never reusable. `maxTasks` counts non-deleted tasks. `leaseDurationMs` defaults task claims and renewals to 15 minutes. The mailbox limit is per target; the byte limit covers the complete framed delivery, including its stable id and sender name. `disposalTimeoutMs` bounds admitted creation, mailbox dispatch, and Team-owned Activation settlement so plugin reload and process shutdown fail visibly instead of waiting forever.
+Every limit must be a positive safe integer. `maxMembers` counts every name ever provisioned, including failed members, because names are never reusable. `maxTasks` counts non-deleted tasks. The mailbox limit is per target; the byte limit covers the complete framed delivery, including its stable id and sender name. `disposalTimeoutMs` bounds admitted creation, mailbox dispatch, and Team-owned Activation settlement so plugin reload and process shutdown fail visibly instead of waiting forever.
 
 The service requires Agent, Session, Session persistence, and continuable-subagent services. A composition without durable Session storage does not activate it.
 
@@ -30,7 +29,7 @@ Every ordinary runtime root is the implicit Lead of a Team whose `TeamId` equals
 
 Fresh children have no parent-history seed. Fork children capture the Lead's completed-turn prefix once; the in-flight delegation turn is excluded. Inherited Team records carry the old root's `TeamId` and are ignored when an ordinary fork becomes an independent runtime root. Provider-owned subagents outside the roster do not become nested Team Leads.
 
-The roster reports durable provisioning/failed phases and live `running`/`idle` status. Task verification admits the Lead or an active teammate; a provisioning teammate receives `TEAM_MEMBER_NOT_ACTIVE`. An active but non-resident teammate is `inactive`; later waking delivery cold-resumes it through the continuation owner.
+The roster reports durable provisioning/failed phases and live `running`/`idle` status. An active but non-resident teammate is `inactive`; later waking delivery cold-resumes it through the continuation owner.
 
 ## Durable mailbox
 
@@ -42,17 +41,15 @@ The guarantee is process-local retry plus target-Session de-duplication, not cro
 
 ## Shared task board
 
-Tasks are complete versioned snapshots. Every mutation carries `expectedRevision`; stale callers receive `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Any member can create, read, or claim a ready unowned task. A claim records an absolute `leaseExpiresAt`; only the owner can renew it, and any member can reclaim an in-progress task after its lease expires. Each claim or reclaim appends the caller to the stable de-duplicated `authorIds`; an assigned owner joins that list only after renewing, editing, setting dependencies, completing, or releasing the task. Lead reassignment alone records neither the assignee nor the Lead, and no author may verify the task. Views derive `leaseExpired` from the current clock, while replay only carries the recorded timestamp and never changes task status or ownership from time alone. The owner or Lead can edit, release, complete, reopen, or delete a task; only the Lead can assign another member. Numeric `task-<n>` ids require a safe-integer suffix; creation reports `TEAM_TASK_LIMIT` instead of reusing the final safe id.
+Tasks are complete versioned snapshots. Every mutation carries `expectedRevision`; stale callers receive `TEAM_TASK_STALE_REVISION` instead of overwriting a newer value. Any member can create, read, or claim a ready unowned task. The owner or Lead can edit, release, complete, reopen, or delete it; only the Lead can assign another member. Numeric `task-<n>` ids require a safe-integer suffix; creation reports `TEAM_TASK_LIMIT` instead of reusing the final safe id.
 
 Dependencies must name current non-deleted tasks and form a complete DAG with no self or duplicate edge. A pending task is ready only after every blocker completes. Deleting a task that still has a non-deleted dependent is rejected. Deleted tasks remain tombstones for replay and id stability but do not consume `maxTasks` or appear in `listTasks()`.
 
-A failed verification increments `attempts` and tracks consecutive identical `errorSig` values in `stagnation`. Five failures or three consecutive matching signatures move the task to unowned `blocked`; blocked tasks cannot be claimed or satisfy dependents. Only the Lead can `unblock` a task, which returns it to pending and resets both counters.
-
-`writeScopes` are normalized workspace-relative prefixes. A Team initiator that owns one or more scoped `in_progress` or `in_review` tasks may issue a filesystem write or edit intent only when the canonical target belongs to at least one scope on every such task; an intent without an initiating Agent is refused. Views warn when scopes overlap an in-progress task, and scopes do not block claim.
+`writeScopes` are normalized workspace-relative prefixes. Views warn when they overlap an in-progress task, but they never block claim or authorize filesystem writes. They are coordination hints, not locks.
 
 `waitForChange()` waits for one roster, task, mailbox, or live-status edge that occurs after registration, for 10 seconds through one hour; it reports only whether the wait timed out and does not replay a change that already happened. Runtime disposal releases current waits and makes later waits return immediately without a timeout. Callers re-read authoritative state after wakeup or timeout. Cancellation preserves an Error reason or reports a non-Error reason through `TEAM_WAIT_ABORTED` with structural inspection instead of object coercion. `interrupt()` is Lead-only and delegates to the continuable-subagent interrupt path, which cancels only a live teammate's current turn with `keepInbox`; it neither releases task ownership nor deletes durable mail.
 
-The separate `./invariant` companion replays each candidate Team event against its committed Session prefix. Replay validates every current-version Team payload before it enters folded state, then rejects invalid member transitions, reused names, out-of-range numeric task ids, discontinuous task revisions, removed or reordered task authors, regressing verification counters outside Lead unblock, completed-task receipts from an author or anyone other than the Lead or an active roster member, invalid task dependencies, duplicate queue/ack records, and acknowledgements with the wrong target before append. Session event `seq` and `time` own ordering and timing instead of duplicated snapshot timestamps.
+The separate `./invariant` companion replays each candidate Team event against its committed Session prefix. Replay validates every current-version Team payload before it enters folded state, then rejects invalid member transitions, reused names, out-of-range numeric task ids, discontinuous task revisions, invalid task dependencies, duplicate queue/ack records, and acknowledgements with the wrong target before append. Session event `seq` and `time` own ordering and timing instead of duplicated snapshot timestamps.
 
 ## Model Experience
 
@@ -73,7 +70,7 @@ Peer messages append after the target's reusable history prefix. Cold resume reu
 ## Known Limitations and Deferred Work
 
 - **One process and one shared checkout** — members share cwd and observe edits immediately; this package provides no worktree, remote member, merge, or filesystem lock.
-- **Write scopes do not confine ordinary model tools** — Model-facing `bash`, `pwsh`, `terminal_send`, and `run_code` bypass filesystem intent events and can write outside every declared scope. Direct subprocess, terminal, and external writes bypass them too. The guard samples task ownership and status around asynchronous scope resolution but cannot stop a release or reassignment after its final sample and before the filesystem mutation.
+- **Advisory write scopes** — Bash, formatters, code generators, and direct external writers can bypass filesystem version checks; Leads must coordinate ownership and review the final diff.
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
-- **Lease expiry requires a claimant** — no timer mutates durable state; another member must append a reclaim after observing `leaseExpired`.
+- **No automatic ownership release** — idle, interruption, process exit, and failed work do not release a task owner.
 - **Mailbox is not cross-process exactly-once** — concurrent harness processes over one Team are unsupported.

@@ -54,28 +54,7 @@ interface TeamMessageSource {
 
 ## 共享任务 DAG
 
-每条 task event 都存储完整快照。`revision` 是 compare-and-set 值，每次变更递增 1。claim 与 renew 会记录绝对租期截止时间。`authorIds` 按首次行动顺序保留 contributor：claim、reclaim，以及由 owner 执行的 renew、edit、set dependencies、complete 或 release 会追加实际行动的 member，而 Lead reassign 不会追加 assignee。任何 contributor 都不能验证该任务；verification 失败计数器决定任务何时变为 blocked。`blockedBy` edge 必须指向未删除任务，并维持无环图。`writeScopes` 是规范化的提示性路径前缀，不是锁。
-
-```ts
-import type { SessionId } from '@deepseek-ai/dsh-session'
-
-/** Durable task lifecycle. */
-type TeamTaskStatus = 'pending' | 'in_progress' | 'in_review' | 'blocked' | 'completed' | 'deleted'
-
-/** Durable proof that a non-author ran a gate command against a named commit. */
-interface TeamTaskReceipt {
-  readonly verifierId: SessionId
-  readonly verifierName: string
-  readonly command: string
-  readonly exitCode: number
-  readonly gitSha: string
-  readonly branch: string
-  readonly dirty: boolean
-  readonly outputDigest: string
-  readonly workerProvider?: string
-  readonly verifierProvider?: string
-}
-```
+每条 task event 都存储完整快照。`revision` 是 compare-and-set 值，每次变更递增 1。`blockedBy` edge 必须指向未删除任务，并维持无环图。`writeScopes` 是规范化的提示性路径前缀，不是锁。
 
 ```ts type-equiv
 /** Whole durable task snapshot; every mutation increments {@link revision}. */
@@ -85,24 +64,17 @@ interface TeamTaskSnapshot {
   readonly subject: string
   readonly description: string
   readonly status: TeamTaskStatus
-  readonly requiresProvider?: string
   readonly ownerId?: SessionId
-  readonly authorIds: SessionId[]
-  readonly leaseExpiresAt?: number
-  readonly attempts: number
-  readonly lastErrorSig?: string
-  readonly stagnation: number
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
-  readonly receipt?: TeamTaskReceipt
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`in_review` 等待独立验证，`blocked` 是无 owner 的 verification-failure stop，`completed` 满足 blocker，`deleted` 是保留的 tombstone。验证会把 gate 结果记录到 `receipt`。view 会添加 owner name、租期过期状态、readiness 和 write-scope 重叠警告，但不会改变持久快照。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`deleted` 是保留的 tombstone。view 会添加 owner name、readiness 和 write-scope 重叠警告，但不会改变持久快照。
 
 ## 回放
 
-`foldTeam()` 把一个 Root Session 回放成每个 Team 操作所读取的 roster、任务板与 queued-minus-delivered mailbox。它按 `TeamId` 选取记录，因此普通 fork 继承的 event 保留 ancestor id，绝不会进入新 Root 的状态。Session event 的 `seq` 与 `time` 继续负责顺序和时间记录，Team snapshot 不再重复保存它们。回放会携带 `leaseExpiresAt`，但不会读取当前时钟；它要求 `authorIds` 保留先前前缀，并拒绝 unblock 时精确归零以外的 verification 计数器下降；task view 在读取时派生过期状态。roster 与 task 读取以 view 形式到达调用方，附带 owner name、租期过期状态、readiness 与 write-scope 警告，而 pending 邮件仅供投递与恢复内部使用。包 [README](../../packages/experimental/agent-team/README.zh.md)负责 operation、authorization、recovery 和限制行为。
+`foldTeam()` 把一个 Root Session 回放成每个 Team 操作所读取的 roster、任务板与 queued-minus-delivered mailbox。它按 `TeamId` 选取记录，因此普通 fork 继承的 event 保留 ancestor id，绝不会进入新 Root 的状态。Session event 的 `seq` 与 `time` 继续负责顺序和时间记录，Team snapshot 不再重复保存它们。roster 与 task 读取以 view 形式到达调用方，附带 owner name、readiness 与 write-scope 警告，而 pending 邮件仅供投递与恢复内部使用。包 [README](../../packages/experimental/agent-team/README.zh.md)负责 operation、authorization、recovery 和限制行为。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -207,5 +179,5 @@ tryMembership(agent: Agent): TeamMembership | undefined
 
 Types: [Agent](core.zh.md)
 
-Source: [`packages/experimental/agent-team/src/index.ts`](../../packages/experimental/agent-team/src/index.ts)
+Source: [`packages/extensions/agent-team-gate/src/index.ts`](../../packages/extensions/agent-team-gate/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -12,13 +12,12 @@
   config:
     maxMembers: 8
     maxTasks: 256
-    leaseDurationMs: 900000
     maxPendingMessagesPerMember: 64
     maxMessageBytes: 65536
     disposalTimeoutMs: 5000
 ```
 
-每个限制都必须是正的安全整数。`maxMembers` 统计所有曾 provision 的名字，包括失败成员，因为名字永不复用。`maxTasks` 统计未删除任务。`leaseDurationMs` 将任务 claim 与 renew 的默认租期设为 15 分钟。mailbox 限额按目标成员计算；字节限制覆盖完整的投递帧，包括稳定 id 与发送者名称。`disposalTimeoutMs` 限制已获准创建、mailbox dispatch 与 Team 自有 Activation 的 settlement 时长，使插件 reload 与进程 shutdown 在异常时明确失败，而不是无限等待。
+每个限制都必须是正的安全整数。`maxMembers` 统计所有曾 provision 的名字，包括失败成员，因为名字永不复用。`maxTasks` 统计未删除任务。mailbox 限额按目标成员计算；字节限制覆盖完整的投递帧，包括稳定 id 与发送者名称。`disposalTimeoutMs` 限制已获准创建、mailbox dispatch 与 Team 自有 Activation 的 settlement 时长，使插件 reload 与进程 shutdown 在异常时明确失败，而不是无限等待。
 
 该服务要求 Agent、Session、Session persistence 与 continuable-subagent 服务。没有持久 Session 存储的组合不会激活它。
 
@@ -30,7 +29,7 @@
 
 fresh child 不带 parent 历史 seed。fork child 只捕获一次 Lead 的已完成 turn 前缀，不包含正在执行 delegation 的 turn。继承的 Team 记录带有旧 Root 的 `TeamId`，普通 fork 成为独立运行时 Root 后会忽略这些记录。roster 之外、由 provider 管理的 subagent 不会被误认为嵌套 Team Lead。
 
-roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idle` 状态。task verification 只允许 Lead 或 active teammate 调用；provisioning teammate 会收到 `TEAM_MEMBER_NOT_ACTIVE`。active 但不驻留的 teammate 显示为 `inactive`；后续 wakeup 投递会经 continuation owner 冷恢复它。
+roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idle` 状态。active 但不驻留的 teammate 显示为 `inactive`；后续 wakeup 投递会经 continuation owner 冷恢复它。
 
 ## 持久 mailbox
 
@@ -42,17 +41,15 @@ roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idl
 
 ## 共享任务板
 
-任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。claim 会记录绝对时间 `leaseExpiresAt`；只有 owner 可以 renew，租期过期后任意成员都可以 reclaim in-progress 任务。每次 claim 或 reclaim 都会把调用方追加到顺序稳定且去重的 `authorIds`；被分配的 owner 只有在 renew、edit、set_dependencies、complete 或 release 任务后才会加入该列表。Lead reassign 本身既不记录 assignee，也不记录 Lead；任何 author 都不能验证任务。view 根据当前时钟派生 `leaseExpired`，回放只携带已记录的时间戳，绝不会仅因时间流逝而改变任务 status 或 owner。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
+任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
 
 依赖必须指向当前未删除任务，并组成完整 DAG，不允许 self edge 或重复 edge。只有所有 blocker 都 completed，pending 任务才 ready。仍被未删除任务依赖的任务不能删除。删除任务作为 tombstone 保留以供回放和维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。
 
-verification 失败会增加 `attempts`，并通过 `stagnation` 统计连续相同的 `errorSig`。失败五次或连续三次签名相同会把任务转为无 owner 的 `blocked`；blocked 任务不能被 claim，也不能满足 dependent。只有 Lead 可以执行 `unblock`，将任务恢复为 pending 并把两个计数器归零。
-
-`writeScopes` 会规范化为 workspace-relative 路径前缀。Team initiator 拥有一个或多个带 scope 的 `in_progress` 或 `in_review` 任务时，只有 canonical target 同时属于每个任务的至少一个 scope，才能发出 filesystem write 或 edit intent；没有 initiating Agent 的 intent 会被拒绝。view 会对与 in-progress 任务的 scope 重叠发出警告，scope 不会阻止 claim。
+`writeScopes` 会规范化为 workspace-relative 路径前缀。view 会对与 in-progress 任务的重叠发出警告，但绝不会阻止 claim 或授予文件写权限。它们是协作提示，不是锁。
 
 `waitForChange()` 可以等待注册后发生的下一条 roster、task、mailbox 或实时 status 边，时长范围为 10 秒到 1 小时；它只报告等待是否超时，也不会回放调用前已经发生的变化。运行时 dispose 会释放当前等待，并使后续等待不经超时立即返回。调用方需要在唤醒或超时后重新读取权威状态。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 以结构化检查结果报告，不再强制转成 object 字符串。`interrupt()` 仅限 Lead，并委托 continuable-subagent 的 interrupt 路径以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
 
-独立的 `./invariant` 配套模块会把每条候选 Team event 对照已提交 Session 前缀回放。回放会先验证每个当前版本 Team payload，再将其纳入折叠状态；随后会在 append 前拒绝非法 member 转换、名字复用、超出范围的数字 task id、不连续任务 revision、删除或重排 task author、Lead unblock 以外的 verification 计数器回退、由 author 或既非 Lead 也非 active roster member 的 verifier 提供的 completed-task receipt、非法任务依赖、重复 queue／ack，以及 target 不匹配的 acknowledgement。顺序与时间由 Session event 的 `seq` 和 `time` 负责，不在 snapshot 中重复保存。
+独立的 `./invariant` 配套模块会把每条候选 Team event 对照已提交 Session 前缀回放。回放会先验证每个当前版本 Team payload，再将其纳入折叠状态；随后会在 append 前拒绝非法 member 转换、名字复用、超出范围的数字 task id、不连续任务 revision、非法任务依赖、重复 queue／ack，以及 target 不匹配的 acknowledgement。顺序与时间由 Session event 的 `seq` 和 `time` 负责，不在 snapshot 中重复保存。
 
 ## 模型体验
 
@@ -73,7 +70,7 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 ## 已知限制与暂缓事项
 
 - **单进程、共享 checkout**：所有成员共享 cwd，修改立即可见；本包不提供 worktree、远端成员、自动 merge 或文件锁。
-- **write scope 无法约束普通模型工具**：面向模型的 `bash`、`pwsh`、`terminal_send` 和 `run_code` 会绕过 filesystem intent event，可以写入所有声明 scope 之外。直接 subprocess、terminal 和外部写入也会绕过。guard 会在异步 scope 解析前后采样任务 owner 与 status，但无法阻止最终采样之后、filesystem mutation 之前发生的 release 或 reassign。
+- **write scope 仅作提示**：Bash、formatter、codegen 和直接外部写入可以绕过文件版本检查；Lead 必须协调 owner 并检查最终 diff。
 - **扁平且不可变的 roster**：只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
-- **租期到期后仍需 claimant**：timer 不会改变持久状态；其他成员观察到 `leaseExpired` 后必须追加 reclaim。
+- **不会自动释放 owner**：idle、interrupt、进程退出与工作失败都不会释放任务 owner。
 - **mailbox 不保证跨进程 exactly-once**：不支持多个 harness 进程并发操作同一 Team。

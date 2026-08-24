@@ -1,0 +1,79 @@
+# @deepseek-ai/dsh-agent-team-gate
+
+[English](README.md) | 中文
+
+具有收据门禁完成验证、租约追踪、抖动封顶、写入范围强制执行和 Provider 验证的隐式 Root Agent Teams 领域。`ctx.agentTeams` 在 Lead Session 日志中维护扁平的 Lead／teammate roster、持久 peer mailbox 与共享任务 DAG。
+
+## 配置
+
+```yaml
+- id: agent-team-gate
+  name: '@deepseek-ai/dsh-agent-team-gate'
+  config:
+    maxMembers: 8
+    maxTasks: 256
+    leaseDurationMs: 900000
+    maxPendingMessagesPerMember: 64
+    maxMessageBytes: 65536
+    disposalTimeoutMs: 5000
+```
+
+每个限制都必须是正的安全整数。`maxMembers` 统计所有曾 provision 的名字，包括失败成员，因为名字永不复用。`maxTasks` 统计未删除任务。`leaseDurationMs` 为任务认领和续期设置默认 15 分钟租约。mailbox 限额按目标成员计算；字节限制覆盖完整的投递帧，包括稳定 id 与发送者名称。`disposalTimeoutMs` 限制已获准创建、mailbox dispatch 与 Team 自有 Activation 的 settlement 时长，使插件 reload 与进程 shutdown 在异常时明确失败，而不是无限等待。
+
+该服务要求 Agent、Session、Session persistence 与 continuable-subagent 服务。没有持久 Session 存储的组合不会激活它。
+
+## Team 身份与 roster
+
+每个普通运行时 Root 都是一个隐式 Team 的 Lead，其 `TeamId` 等于 `SessionId`；因此，在写入第一条成员、消息或任务记录前，创建 Team 不需要额外状态。teammate 是记录在 Root Session 中的具名 continuable 直接 child。名字采用小写 kebab-case，最长 64 个字符，在 Team 生命周期内不可变。Session id 始终是持久化与授权身份。
+
+`spawnTeammate()` 先追加并 flush provisioning member，再要求配置的 spawn 或 fork provider 使用预留 child id 创建成员。provider 失败会追加持久 failed member。初始 inbox 消息获准后，先 flush child Session，再提交 active 边。Root 恢复时，只有独立持久 child 的直接 parent 与 continuable descriptor 匹配，并且其初始用户消息仍在持久 inbox 中或已经记录进历史，provisioning 才转为 active；否则转为 failed。如果 recovery 在同进程 provisioning 竞争中先完成，creator 会接受匹配终态，或报告 `TEAM_PROVISIONING_CONFLICT` 并 drain 已被 recovery 标为 failed 的 child。dispose 会关闭准入，中止并等待已获准的创建与 mailbox dispatch 事务，再让 continuation owner 释放 roster 中确切的 live direct child 及其后代；Lead 的非 Team continuable child 不受影响。cleanup 失败会让 dispose 明确失败。该对账覆盖 Root provisioning 与终态成员边之间的崩溃和 reload 窗口，同时不复用名字或遗留孤儿 Activation。
+
+fresh child 不带 parent 历史 seed。fork child 只捕获一次 Lead 的已完成 turn 前缀，不包含正在执行 delegation 的 turn。继承的 Team 记录带有旧 Root 的 `TeamId`，普通 fork 成为独立运行时 Root 后会忽略这些记录。roster 之外、由 provider 管理的 subagent 不会被误认为嵌套 Team Lead。
+
+roster 同时报告持久 provisioning／failed phase 与实时 `running`／`idle` 状态。任务验证允许 Lead 或 active teammate；provisioning teammate 收到 `TEAM_MEMBER_NOT_ACTIVE`。active 但不驻留的 teammate 显示为 `inactive`；后续 wakeup 投递会经 continuation owner 冷恢复它。
+
+## 持久 mailbox
+
+`sendMessage()` 校验 peer 成员关系，追加 `team/message/queued` 并 flush，之后才尝试投递。结果始终标识该持久消息；`queued` 表示即时投递被推迟，并不表示需要重发。target 为 live 时，quiet 投递会立即注入、flush 并确认上下文，但绝不会激活 inactive target；inactive target 的 quiet 消息会保持 queued。wakeup 投递成为 target 的下一个 FIFO turn，并在需要时冷恢复它。
+
+目标消息以 `Team message <id> from <name>:` 开头，并在 `TeamMessageSource` 中保留同一 id 与发送者。target Session 在 pending inbox 或已记录的用户消息历史中持久保存该身份后，Lead 日志才追加 `team/message/delivered`。即时准入按 target 和持久 queue 顺序串行化，恢复也按同一顺序重新投递 queued-minus-delivered 记录。重试前会同时折叠 live 与持久 target 的 inbox／历史状态，因此 inbox 已接受但模型尚未 claim 时发生崩溃也不会复制消息。Lead 日志 flush 成功后会唤醒当前 `waitForChange()` 调用方，调用方随后重新列出权威状态。
+
+该保证是进程内重试加 target Session 去重，而不是跨进程 exactly-once。本版本没有跨进程共享 mailbox 事务，也没有 mailbox 时间线 UI。
+
+## 共享任务板
+
+任务是完整的版本化快照。每次变更都携带 `expectedRevision`；陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，不会覆盖更新值。任意成员都可以创建、读取或 claim ready 且无 owner 的任务。认领会记录绝对的 `leaseExpiresAt`；只有 owner 可以续期，且任何成员都可以在租约过期后重新认领进行中的任务。每次认领或重新认领都会将调用者追加到稳定去重的 `authorIds` 中；分配的 owner 仅在续期、编辑、设置依赖、完成或释放任务后才会加入该列表。Lead 重新分配既不记录被分配者也不记录 Lead，且任何作者都不得验证任务。view 根据当前时钟派生 `leaseExpired`，而回放仅保留记录的时间戳，绝不单独因时间改变任务状态或所有权。Owner 或 Lead 可以编辑、释放、完成、重开或删除任务；只有 Lead 可以分配给其他成员。数字 `task-<n>` id 的后缀必须是安全整数；最后一个安全 id 已被占用时，创建会报告 `TEAM_TASK_LIMIT`，而不会复用该 id。
+
+依赖必须指向当前未删除任务，并组成完整 DAG，不允许 self edge 或重复 edge。只有所有 blocker 都 completed，pending 任务才 ready。仍被未删除任务依赖的任务不能删除。删除任务作为 tombstone 保留以供回放和维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。
+
+验证失败会递增 `attempts` 并在 `stagnation` 中追踪连续相同的 `errorSig` 值。五次失败或三次连续相同签名会将任务转入未认领的 `blocked` 状态；blocked 任务无法被认领或满足依赖项。只有 Lead 可以 `unblock` 任务，将其重置为 pending 并重置两个计数器。
+
+`writeScopes` 会规范化为 workspace-relative 路径前缀。拥有一个或多个带作用域的 `in_progress` 或 `in_review` 任务的 Team 发起者，仅当规范目标属于每个此类任务的至少一个作用域时，才可发出文件系统写入或编辑意图；未附带发起 Agent 的意图将被拒绝。view 会对与进行中任务重叠的作用域发出警告，但作用域不会阻止认领。
+
+`waitForChange()` 可以等待注册后发生的下一条 roster、task、mailbox 或实时 status 边，时长范围为 10 秒到 1 小时；它只报告等待是否超时，也不会回放调用前已经发生的变化。运行时 dispose 会释放当前等待，并使后续等待不经超时立即返回。调用方需要在唤醒或超时后重新读取权威状态。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 以结构化检查结果报告，不再强制转成 object 字符串。`interrupt()` 仅限 Lead，并委托 continuable-subagent 的 interrupt 路径以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
+
+独立的 `./invariant` 配套模块会把每条候选 Team event 对照已提交 Session 前缀回放。回放会先验证每个当前版本 Team payload，再将其纳入折叠状态；随后会在 append 前拒绝非法 member 转换、名字复用、超出范围的数字 task id、不连续任务 revision、移除或重新排序的任务作者、非 Lead 解除阻塞下的递减验证计数器、作者或除 Lead 和 active roster 成员以外任何人提供的已完成任务收据、非法任务依赖、重复 queue／ack，以及 target 不匹配的 acknowledgement。顺序与时间由 Session event 的 `seq` 和 `time` 负责，不在 snapshot 中重复保存。
+
+## 模型体验
+
+### Peer 消息
+
+#### 模型看到的内容
+
+每条已投递 peer 消息都是用户角色消息，格式为 `Team message <id> from <name>:`。第一个短文本块包含稳定消息 id 与发送者，之后原样附加发送者的内容块。roster、task 和 mailbox 记录本身只存在于日志，不进入派生模型历史。模型工具包括 `spawn_teammate`、`send_message`、`followup_task`、`list_agents`、`wait_agent`、`interrupt_agent`、`team_task_create`、`team_task_list`、`team_task_get` 与 `team_task_update`。
+
+#### Token 影响
+
+每次 peer 投递都会把发送者前缀与消息内容加入 target 历史。任务和 roster 变更不增加模型 token；其面向模型的呈现属于工具执行结果。
+
+#### KV Cache 影响
+
+Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用持久对话，再追加尚未投递的消息。
+
+## 已知限制与暂缓事项
+
+- **单进程、共享 checkout**：所有成员共享 cwd，修改立即可见；本包不提供 worktree、远端成员、自动 merge 或文件锁。
+- **Write scopes 不限制普通模型工具**：面向模型的 `bash`、`pwsh`、`terminal_send` 与 `run_code` 绕过文件系统意图事件，可以写入声明作用域之外。直接子进程、终端和外部写入也会绕过它们。保护层在异步作用域解析前后采样任务所有权和状态，但无法阻止在其最终采样后及文件系统变更前的释放或重新分配。
+- **扁平且不可变的 roster**：只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
+- **租约过期需要认领者**：没有定时器修改持久状态；其他成员必须在观察到 `leaseExpired` 后追加重新认领。
+- **mailbox 不保证跨进程 exactly-once**：不支持多个 harness 进程并发操作同一 Team。

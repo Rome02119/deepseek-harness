@@ -1853,10 +1853,6 @@ Create one unowned pending task on the shared Team task board.
       "type": "string",
       "description": "Complete task details and acceptance criteria."
     },
-    "requires_provider": {
-      "type": "string",
-      "description": "Optional provider required to claim or work on this task."
-    },
     "blocked_by": {
       "type": "array",
       "description": "Task ids that must complete first.",
@@ -1904,7 +1900,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_list`
 
-List shared tasks, including readiness, owner, lease, verification counters, revision, blockers, and write-scope warnings.
+List shared tasks, including readiness, owner, revision, blockers, and write-scope warnings.
 
 ```json
 {
@@ -1916,8 +1912,6 @@ List shared tasks, including readiness, owner, lease, verification counters, rev
       "enum": [
         "pending",
         "in_progress",
-        "in_review",
-        "blocked",
         "completed"
       ]
     },
@@ -1964,15 +1958,12 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
       "description": "Task transition to apply.",
       "enum": [
         "claim",
-        "renew",
         "release",
         "edit",
         "set_dependencies",
         "complete",
-        "verify",
         "reopen",
         "reassign",
-        "unblock",
         "delete"
       ]
     },
@@ -1983,10 +1974,6 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     "description": {
       "type": "string",
       "description": "Replacement details for edit."
-    },
-    "requires_provider": {
-      "type": "string",
-      "description": "Replacement required provider for edit."
     },
     "blocked_by": {
       "type": "array",
@@ -2005,49 +1992,6 @@ Compare-and-set a shared task action using the latest revision from team_task_ge
     "owner": {
       "type": "string",
       "description": "Member name for Lead-only reassign; omit to unassign."
-    },
-    "error_sig": {
-      "type": "string",
-      "description": "Failure signature used by verify to detect repeated errors."
-    },
-    "receipt": {
-      "type": "object",
-      "description": "Clean gate result for verify. Verifier identity comes from the calling Team member.",
-      "additionalProperties": false,
-      "properties": {
-        "command": {
-          "type": "string"
-        },
-        "exit_code": {
-          "type": "integer"
-        },
-        "git_sha": {
-          "type": "string"
-        },
-        "branch": {
-          "type": "string"
-        },
-        "dirty": {
-          "type": "boolean"
-        },
-        "output_digest": {
-          "type": "string"
-        },
-        "worker_provider": {
-          "type": "string"
-        },
-        "verifier_provider": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "command",
-        "exit_code",
-        "git_sha",
-        "branch",
-        "dirty",
-        "output_digest"
-      ]
     }
   },
   "required": [
