@@ -6,6 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { FsTargetKey, type FsTarget } from '@deepseek-ai/dsh-fs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -2172,5 +2173,180 @@ describe('Team mailbox and waiting', () => {
     expect(durable(second.lead).members[0]).toMatchObject({
       phase: 'failed', error: 'settled elsewhere',
     })
+  })
+})
+
+function fsTarget(path: string): FsTarget {
+  return { targetKey: FsTargetKey(path), displayPath: path }
+}
+
+describe('Enforced write scopes', () => {
+  it('refuses writes outside declared writeScopes and allows writes within writeScopes', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const member = await spawn(ctx, lead, 'worker')
+    const worker = await waitRunning(ctx, member.member.id)
+
+    const task = await ctx.agentTeams.createTask(worker, {
+      subject: 'scoped task',
+      description: 'scoped to src/a/',
+      writeScopes: ['src/a/'],
+    })
+
+    // Before claiming: agent has no in-progress task, so unrestricted
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
+    ).resolves.toBeUndefined()
+
+    // Claim task: agent now owns in-progress task with writeScopes ['src/a']
+    await ctx.agentTeams.updateTask(worker, {
+      taskId: task.id,
+      expectedRevision: task.revision,
+      action: 'claim',
+    })
+
+    // Out-of-scope write to src/b/x.ts is REFUSED with TEAM_OUT_OF_SCOPE_WRITE
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
+    ).rejects.toMatchObject({
+      name: 'TeamError',
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+
+    // Out-of-scope edit to src/b/x.ts is also REFUSED
+    await expect(
+      ctx.waterfall('fs/edit-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
+    ).rejects.toMatchObject({
+      name: 'TeamError',
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+
+    // In-scope write to src/a/x.ts IS ALLOWED
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/a/x.ts'), { agent: worker }, () => undefined),
+    ).resolves.toBeUndefined()
+
+    // In-scope edit to src/a/x.ts IS ALLOWED
+    await expect(
+      ctx.waterfall('fs/edit-intent', fsTarget('src/a/x.ts'), { agent: worker }, () => undefined),
+    ).resolves.toBeUndefined()
+
+    // Prefix-correct matching: scope 'src/a' must NOT permit 'src/ab/x.ts'
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/ab/x.ts'), { agent: worker }, () => undefined),
+    ).rejects.toMatchObject({
+      name: 'TeamError',
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+
+    ctx.agentTeams.interrupt(lead, 'worker')
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('permits any write when task declares no writeScopes or agent has no in-progress task', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const member = await spawn(ctx, lead, 'unrestricted-worker')
+    const worker = await waitRunning(ctx, member.member.id)
+
+    // Unscoped task
+    const task = await ctx.agentTeams.createTask(worker, {
+      subject: 'unscoped task',
+      description: 'no write scopes declared',
+      writeScopes: [],
+    })
+
+    await ctx.agentTeams.updateTask(worker, {
+      taskId: task.id,
+      expectedRevision: task.revision,
+      action: 'claim',
+    })
+
+    // Unrestricted writes allowed anywhere
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
+    ).resolves.toBeUndefined()
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('anywhere/file.ts'), { agent: worker }, () => undefined),
+    ).resolves.toBeUndefined()
+
+    // Release task: agent has no in-progress task -> unrestricted
+    await ctx.agentTeams.updateTask(worker, {
+      taskId: task.id,
+      expectedRevision: 2,
+      action: 'release',
+    })
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/b/x.ts'), { agent: worker }, () => undefined),
+    ).resolves.toBeUndefined()
+
+    ctx.agentTeams.interrupt(lead, 'unrestricted-worker')
+    await waitNoAgent(ctx, worker.id)
+  })
+
+  it('enforces write scopes on the Lead when Lead owns an in-progress scoped task', async () => {
+    const { ctx, lead } = await setup([])
+
+    const leadTask = await ctx.agentTeams.createTask(lead, {
+      subject: 'lead task',
+      description: 'lead scoped work',
+      writeScopes: ['src/features/'],
+    })
+
+    // Before claim: Lead has no in-progress task -> unrestricted
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/core.ts'), { agent: lead }, () => undefined),
+    ).resolves.toBeUndefined()
+
+    // Lead claims scoped task
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: leadTask.id,
+      expectedRevision: leadTask.revision,
+      action: 'claim',
+    })
+
+    // Lead writing outside src/features/ is REFUSED
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/core.ts'), { agent: lead }, () => undefined),
+    ).rejects.toMatchObject({
+      name: 'TeamError',
+      code: 'TEAM_OUT_OF_SCOPE_WRITE',
+    })
+
+    // Lead writing inside src/features/ IS ALLOWED
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/features/widget.ts'), { agent: lead }, () => undefined),
+    ).resolves.toBeUndefined()
+  })
+
+  it('permits writes from non-team actors or unassociated calls', async () => {
+    const { ctx, lead } = await setup([])
+    // Actor with no agent
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('any/path.ts'), undefined, () => undefined),
+    ).resolves.toBeUndefined()
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('any/path.ts'), {}, () => undefined),
+    ).resolves.toBeUndefined()
+
+    // Non-team agent (e.g. detached agent)
+    const outsider = await ctx.agents.create({
+      sessionId: SessionId('outsider'),
+      agentOptions: { provider: 'mock', model: 'mock' },
+    })
+    // Even if lead has scoped in-progress task
+    const task = await ctx.agentTeams.createTask(lead, {
+      subject: 'lead scoped',
+      description: 'scoped only',
+      writeScopes: ['src/scoped'],
+    })
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: task.id,
+      expectedRevision: task.revision,
+      action: 'claim',
+    })
+
+    await expect(
+      ctx.waterfall('fs/write-intent', fsTarget('src/outside.ts'), { agent: outsider.agent }, () => undefined),
+    ).resolves.toBeUndefined()
+    await outsider.dispose()
   })
 })

@@ -3,6 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { TeamActivity } from './activity.ts'
 import { errorMessage, TeamError } from './error.ts'
@@ -25,12 +26,14 @@ import type {
   TeamWaitResult,
   UpdateTeamTaskRequest,
 } from './types.ts'
+import { assertWriteScope } from './write-scope.ts'
 
 export type * from './types.ts'
 export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
 export { foldTeam } from './fold.ts'
+export { assertWriteScope, isPathInScope, normalizeRelativePath } from './write-scope.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -116,6 +119,14 @@ export class TeamService extends Service {
       const membership = this.roster.tryMembership(agent)
       if (membership !== undefined) this.activity.notify(membership.id)
     })
+    ctx.on('fs/write-intent', async (target, actor, next) => {
+      assertWriteScope(this.roster, this.journal, target, actor)
+      return await next()
+    }, { prepend: true })
+    ctx.on('fs/edit-intent', async (target, actor, next) => {
+      assertWriteScope(this.roster, this.journal, target, actor)
+      return await next()
+    }, { prepend: true })
     ctx.effect(() => () => this.disposeRuntime(), 'agentTeams.runtimeLifecycle()')
     for (const agent of ctx.agents.list()) this.scheduleRecovery(agent)
   }
