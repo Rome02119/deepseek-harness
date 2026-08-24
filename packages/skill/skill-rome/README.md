@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Optional bundled skill provider that contributes Rome's engineering skills (`ask-matt`, `grilling`, `grill-me`, `grill-with-docs`, `to-spec`, `to-tickets`, `implement`, `wayfinder`, `unlazy`) to `ctx.skills`.
+Optional bundled skill provider that contributes Rome's engineering skills (`ask-matt`, `grilling`, `grill-me`, `grill-with-docs`, `to-spec`, `to-tickets`, `implement`, `wayfinder`) to `ctx.skills`.
 
 Mount the plugin to enable the provider. It contributes bundled workflow, specification, testing, and execution discipline skills with package-relative resource bases.
 
@@ -12,7 +12,7 @@ Mount the plugin to enable the provider. It contributes bundled workflow, specif
 
 #### What the model sees
 
-The model-invocable skills in this package (`grilling`, `unlazy`) are rendered into model context by [`@deepseek-ai/dsh-tool-skill`](../tool-skill) as catalog summaries and loaded `<skill_content>` instruction blocks. User-only skills (`disable-model-invocation: true`) remain hidden from model discovery and enter context only upon explicit user slash-command invocation.
+The model-invocable skill in this package (`grilling`) is rendered into model context by [`@deepseek-ai/dsh-tool-skill`](../tool-skill) as catalog summaries and loaded `<skill_content>` instruction blocks. User-only skills (`disable-model-invocation: true`) remain hidden from model discovery and enter context only upon explicit user slash-command invocation.
 
 #### Token effect
 

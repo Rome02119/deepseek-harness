@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-可选的内置 skill（技能）提供方，向 `ctx.skills` 贡献 Rome 的工程 skill（`ask-matt`、`grilling`、`grill-me`、`grill-with-docs`、`to-spec`、`to-tickets`、`implement`、`wayfinder`、`unlazy`）。
+可选的内置 skill（技能）提供方，向 `ctx.skills` 贡献 Rome 的工程 skill（`ask-matt`、`grilling`、`grill-me`、`grill-with-docs`、`to-spec`、`to-tickets`、`implement`、`wayfinder`）。
 
 挂载该插件即可启用提供方。它贡献内置的工作流、规范制定、测试与执行纪律类 skill，并附带基于包相对路径的资源基底。
 
@@ -12,7 +12,7 @@
 
 #### What the model sees
 
-该包中允许模型调用的 skill（`grilling`、`unlazy`）由 [`@deepseek-ai/dsh-tool-skill`](../tool-skill) 渲染到模型上下文中，表现为目录摘要和已加载的 `<skill_content>` 指令块。仅限用户调用的 skill（`disable-model-invocation: true`）在模型发现中保持隐藏，仅在用户显式触发斜杠命令调用时进入上下文。
+该包中允许模型调用的 skill（`grilling`）由 [`@deepseek-ai/dsh-tool-skill`](../tool-skill) 渲染到模型上下文中，表现为目录摘要和已加载的 `<skill_content>` 指令块。仅限用户调用的 skill（`disable-model-invocation: true`）在模型发现中保持隐藏，仅在用户显式触发斜杠命令调用时进入上下文。
 
 #### Token effect
 
