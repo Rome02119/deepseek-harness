@@ -1,4 +1,4 @@
-# @rome/dsh-subscription-quota
+# @deepseek-ai/dsh-subscription-quota
 
 [English](README.md) | 中文
 

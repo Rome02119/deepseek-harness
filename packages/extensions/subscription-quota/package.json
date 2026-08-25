@@ -1,5 +1,5 @@
 {
-  "name": "@rome/dsh-subscription-quota",
+  "name": "@deepseek-ai/dsh-subscription-quota",
   "description": "Read-only view of provider quota information that local CLIs genuinely expose",
   "version": "0.1.0",
   "private": true,
@@ -18,7 +18,11 @@
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js", "lib/invariant.js", "lib/types/**/*.d.ts"],
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

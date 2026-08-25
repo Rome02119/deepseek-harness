@@ -315,7 +315,7 @@
     { "path": "./packages/lsp/lsp-stdio" },
     { "path": "./packages/lsp/tool-lsp" },
     { "path": "./apps/cli" },
-    { "path": "./packages/rome/subscription-quota" },
-    { "path": "./packages/rome/live-agent-view" }
+    { "path": "./packages/extensions/subscription-quota" },
+    { "path": "./packages/extensions/live-agent-view" }
   ]
 }

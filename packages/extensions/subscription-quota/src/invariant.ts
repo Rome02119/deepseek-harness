@@ -1,9 +1,9 @@
-/** Package-owned invariant companion for `@rome/dsh-subscription-quota`. */
+/** Package-owned invariant companion for `@deepseek-ai/dsh-subscription-quota`. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@rome/dsh-subscription-quota'
+const PACKAGE_NAME = '@deepseek-ai/dsh-subscription-quota'
 
 /** Cordis companion plugin name. */
 export const name = 'rome-subscription-quota-invariant'

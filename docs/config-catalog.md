@@ -3385,8 +3385,8 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-tool-subagent-control` — requires `tools` · `subagents` ([`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts))
 - `@deepseek-ai/dsh-user-questions` ([`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts))
 - `@deepseek-ai/dsh-workspace` — requires `storageDomain` · `sessionPersistence` ([`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts))
-- `@rome/dsh-live-agent-view` — requires `agents` · `webServer` ([`packages/rome/live-agent-view/src/index.ts`](../packages/rome/live-agent-view/src/index.ts))
-- `@rome/dsh-subscription-quota` — requires `webServer` ([`packages/rome/subscription-quota/src/index.ts`](../packages/rome/subscription-quota/src/index.ts))
+- `@deepseek-ai/dsh-live-agent-view` — requires `agents` · `webServer` ([`packages/rome/live-agent-view/src/index.ts`](../packages/rome/live-agent-view/src/index.ts))
+- `@deepseek-ai/dsh-subscription-quota` — requires `webServer` ([`packages/rome/subscription-quota/src/index.ts`](../packages/rome/subscription-quota/src/index.ts))
 
 ## Seam packages (not directly loadable)
 

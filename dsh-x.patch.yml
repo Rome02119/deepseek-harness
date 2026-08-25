@@ -1,7 +1,20 @@
+# DSH-X overlay: everything we built, mounted over the stock web profile.
 - insert:
+    # the verification gate — an agent cannot approve its own work
     - id: agent-team-gate
       name: '@deepseek-ai/dsh-agent-team-gate'
+    # external CLI agents (claude / codex / agy) as real team members
+    - id: agent-team-external-cli
+      name: '@deepseek-ai/dsh-experimental-agent-team-external-cli'
+    # rome's 8 Matt Pocock skills
     - id: skill-rome
       name: '@deepseek-ai/dsh-skill-rome'
+    # all 311 models via the local OmniRoute proxy
     - id: llm-omniroute
       name: '@deepseek-ai/dsh-llm-omniroute'
+    # what's left of the paid CLI subscriptions
+    - id: subscription-quota
+      name: '@deepseek-ai/dsh-subscription-quota'
+    # live side-by-side view of every working agent  ->  /live-agents
+    - id: live-agent-view
+      name: '@deepseek-ai/dsh-live-agent-view'

@@ -1,4 +1,4 @@
-# @rome/dsh-live-agent-view
+# @deepseek-ai/dsh-live-agent-view
 
 English | [中文](README.zh.md)
 

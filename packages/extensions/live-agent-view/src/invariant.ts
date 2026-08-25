@@ -1,9 +1,9 @@
-/** Package-owned invariant companion for `@rome/dsh-live-agent-view`. */
+/** Package-owned invariant companion for `@deepseek-ai/dsh-live-agent-view`. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@rome/dsh-live-agent-view'
+const PACKAGE_NAME = '@deepseek-ai/dsh-live-agent-view'
 
 /** Cordis companion plugin name. */
 export const name = 'rome-live-agent-view-invariant'

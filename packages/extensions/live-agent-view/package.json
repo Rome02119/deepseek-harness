@@ -1,5 +1,5 @@
 {
-  "name": "@rome/dsh-live-agent-view",
+  "name": "@deepseek-ai/dsh-live-agent-view",
   "description": "Read-only live multi-agent roster, task, and activity page",
   "version": "0.1.0",
   "private": true,
@@ -18,7 +18,11 @@
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
-  "files": ["lib/index.js", "lib/invariant.js", "lib/types/**/*.d.ts"],
+  "files": [
+    "lib/index.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts"
+  ],
   "license": "MIT",
   "peerDependencies": {
     "@deepseek-ai/cordis": "workspace:^",

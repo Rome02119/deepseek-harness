@@ -3387,8 +3387,8 @@ export interface Config {
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）
-- `@rome/dsh-live-agent-view` — 需要 `agents` · `webServer`（[`packages/rome/live-agent-view/src/index.ts`](../packages/rome/live-agent-view/src/index.ts)）
-- `@rome/dsh-subscription-quota` — 需要 `webServer`（[`packages/rome/subscription-quota/src/index.ts`](../packages/rome/subscription-quota/src/index.ts)）
+- `@deepseek-ai/dsh-live-agent-view` — 需要 `agents` · `webServer`（[`packages/rome/live-agent-view/src/index.ts`](../packages/rome/live-agent-view/src/index.ts)）
+- `@deepseek-ai/dsh-subscription-quota` — 需要 `webServer`（[`packages/rome/subscription-quota/src/index.ts`](../packages/rome/subscription-quota/src/index.ts)）
 
 ## Seam 包（不可直接加载）
 
