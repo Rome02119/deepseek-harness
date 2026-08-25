@@ -1,6 +1,9 @@
 /** External CLI bridge for seating a one-shot CLI as an Agent Teams continuable teammate. */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SendTeamMessageRequest } from '@deepseek-ai/dsh-experimental-agent-team'
@@ -30,7 +33,7 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 export const name = 'experimental-agent-team-external-cli'
 export const inject = ['subagents', 'llm', 'subprocess', 'agentTeams']
 
-const CLI_KINDS = ['agy', 'claude'] as const
+const CLI_KINDS = ['agy', 'claude', 'codex'] as const
 
 type CliKind = typeof CLI_KINDS[number]
 
@@ -40,6 +43,7 @@ const DEFAULT_MODEL = 'agy'
 const DEFAULT_COMMAND = 'agy'
 const DEFAULT_CLI_KIND: CliKind = 'agy'
 const DEFAULT_PERMISSION_MODE = 'dontAsk'
+const DEFAULT_CODEX_SANDBOX = 'danger-full-access'
 const DEFAULT_DISPOSE_GRACE_MS = 3_000
 const DEFAULT_STDOUT_BYTES = 1_048_576
 const DEFAULT_STDERR_BYTES = 65_536
@@ -56,8 +60,10 @@ export interface Config {
   readonly command?: string
   /** Invocation style for the target CLI. */
   readonly cliKind?: CliKind
-  /** Claude Code unattended permission mode; ignored by `agy`. */
+  /** Claude Code unattended permission mode; ignored by `agy` and `codex`. */
   readonly permissionMode?: string
+  /** Codex exec sandbox mode; ignored by `agy` and `claude`. */
+  readonly codexSandbox?: string
   /** Explicit environment layered over the subprocess seam's scrubbed parent environment. */
   readonly env?: Record<string, string>
   /** Grace in milliseconds for subprocess tree termination. */
@@ -75,6 +81,7 @@ export const Config: z<Config> = z.object({
   command: z.string().min(1).default(DEFAULT_COMMAND),
   cliKind: z.union(CLI_KINDS).default(DEFAULT_CLI_KIND),
   permissionMode: z.string().min(1).default(DEFAULT_PERMISSION_MODE),
+  codexSandbox: z.string().min(1).default(DEFAULT_CODEX_SANDBOX),
   env: z.dict(z.string()).default({}),
   disposeGraceMs: z.number().default(DEFAULT_DISPOSE_GRACE_MS),
   stdoutMaxBytes: z.number().default(DEFAULT_STDOUT_BYTES),
@@ -95,6 +102,12 @@ interface CliResult {
   readonly stderr: string
   readonly exitCode: number | null
   readonly signal: NodeJS.Signals | null
+}
+
+interface CliInvocation {
+  readonly argv: string[]
+  readonly outputPath?: string
+  readonly cleanup?: () => void
 }
 
 class ExternalCliProvider implements SubagentProvider {
@@ -182,8 +195,9 @@ class ExternalCliTeamBridge extends LlmAdapter {
   }
 
   private async invoke(session: BridgeSession, prompt: string, signal?: AbortSignal): Promise<CliResult> {
+    const invocation = cliInvocation(this.config, prompt)
     const handle = this.spawn({
-      argv: cliArgv(this.config, prompt),
+      argv: invocation.argv,
       cwd: session.cwd,
       stdio: {
         stdin: 'ignore',
@@ -200,13 +214,14 @@ class ExternalCliTeamBridge extends LlmAdapter {
       await handle.waitForExit()
       return {
         ok: outcome.exitCode === 0 && outcome.signal === null,
-        stdout: handle.collected.stdout?.readFrom(0).text ?? '',
+        stdout: cliStdout(invocation, handle.collected.stdout?.readFrom(0).text ?? ''),
         stderr: handle.collected.stderr?.readFrom(0).text ?? '',
         exitCode: outcome.exitCode,
         signal: outcome.signal,
       }
     } finally {
       this.running.delete(handle)
+      invocation.cleanup?.()
     }
   }
 }
@@ -231,13 +246,30 @@ function cliFailure(result: CliResult): string {
   return `external CLI teammate failed (${fields.join('; ')})`
 }
 
-function cliArgv(config: ResolvedConfig, prompt: string): string[] {
+function cliInvocation(config: ResolvedConfig, prompt: string): CliInvocation {
   switch (config.cliKind) {
     case 'agy':
-      return [config.command, `-p=${prompt}`, '--output-format', 'text', '--dangerously-skip-permissions']
+      return { argv: [config.command, `-p=${prompt}`, '--output-format', 'text', '--dangerously-skip-permissions'] }
     case 'claude':
-      return [config.command, '-p', '--output-format', 'text', '--permission-mode', config.permissionMode, prompt]
+      return { argv: [config.command, '-p', '--output-format', 'text', '--permission-mode', config.permissionMode, prompt] }
+    case 'codex': {
+      const outputDir = mkdtempSync(join(tmpdir(), 'dsh-codex-last-'))
+      const outputPath = join(outputDir, 'last-message.txt')
+      return {
+        argv: [config.command, 'exec', '--skip-git-repo-check', '--sandbox', config.codexSandbox, '--output-last-message', outputPath, prompt],
+        outputPath,
+        cleanup: () => { rmSync(outputDir, { recursive: true, force: true }) },
+      }
+    }
   }
+}
+
+function cliStdout(invocation: CliInvocation, fallback: string): string {
+  if (invocation.outputPath !== undefined && existsSync(invocation.outputPath)) {
+    const output = readFileSync(invocation.outputPath, 'utf8')
+    if (output.trim().length > 0) return output
+  }
+  return fallback
 }
 
 function* textChunks(text: string): Iterable<StreamChunk> {
@@ -312,6 +344,7 @@ function resolvedConfig(config: Config): ResolvedConfig {
     command: config.command ?? DEFAULT_COMMAND,
     cliKind: config.cliKind ?? DEFAULT_CLI_KIND,
     permissionMode: config.permissionMode ?? DEFAULT_PERMISSION_MODE,
+    codexSandbox: config.codexSandbox ?? DEFAULT_CODEX_SANDBOX,
     env: config.env as Record<string, string>,
     disposeGraceMs: config.disposeGraceMs as number,
     stdoutMaxBytes: config.stdoutMaxBytes as number,

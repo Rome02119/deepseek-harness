@@ -48,8 +48,10 @@ function fakeCli(root: string): { command: string; log: string } {
   const command = join(root, 'fake-claude.mjs')
   const log = join(root, 'cli.jsonl')
   writeFileSync(command, `#!/usr/bin/env node
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, writeFileSync } from 'node:fs'
 const log = process.env.CLI_LOG
+const outputFlag = process.argv.indexOf('--output-last-message')
+const outputPath = outputFlag === -1 ? undefined : process.argv[outputFlag + 1]
 const prompt = process.argv.find(arg => arg.startsWith('-p='))?.slice(3) ?? process.argv.at(-1) ?? ''
 appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), prompt }) + '\\n')
 if (process.env.CLI_HANG === '1') {
@@ -62,14 +64,19 @@ if (process.env.CLI_HANG === '1') {
   console.error('fake cli failed')
   process.exit(7)
 } else {
-  console.log('fake reply: ' + (prompt.includes('follow-up') ? 'follow-up seen' : 'initial seen'))
+  const reply = 'fake reply: ' + (prompt.includes('follow-up') ? 'follow-up seen' : 'initial seen')
+  if (outputPath === undefined) console.log(reply)
+  else {
+    writeFileSync(outputPath, reply)
+    console.log('fake codex transcript')
+  }
 }
 `)
   chmodSync(command, 0o755)
   return { command, log }
 }
 
-async function setup(env: Record<string, string> = {}) {
+async function setup(env: Record<string, string> = {}, cliKind: ExternalCliTeam.Config['cliKind'] = 'agy') {
   const root = mkdtempSync(join(tmpdir(), 'dsh-external-cli-team-'))
   roots.push(root)
   const cwd = join(root, 'workspace')
@@ -85,6 +92,7 @@ async function setup(env: Record<string, string> = {}) {
   const cliFiber = await ctx.plugin(ExternalCliTeam, {
     providerName: 'claude-team',
     command: cli.command,
+    cliKind,
     env: { CLI_LOG: cli.log, ...env },
     disposeGraceMs: 50,
   })
@@ -161,6 +169,26 @@ describe('Agent Team external CLI bridge', () => {
     }, { timeout: 5_000 })
     expect(replies.map(message => message.content.at(0))).toContainEqual({ type: 'text', text: 'fake reply: follow-up seen' })
     expect(records(cli.log).at(-1)?.prompt).toContain('follow-up question')
+  })
+
+  it('uses Codex last-message output as the teammate reply', async () => {
+    const { ctx, lead, cli } = await setup({}, 'codex')
+
+    const started = await spawnExternal(ctx, lead)
+    const worker = await live(ctx, started.member.id)
+    await worker.whenIdle()
+
+    expect(assistantText(worker)).toEqual(['fake reply: initial seen'])
+    const [record] = records(cli.log)
+    if (record === undefined) throw new Error('fake CLI did not run')
+    expect(record.argv.slice(0, 6)).toEqual([
+      'exec',
+      '--skip-git-repo-check',
+      '--sandbox',
+      'danger-full-access',
+      '--output-last-message',
+      record.argv[5],
+    ])
   })
 
   it('records external CLI failure as a teammate turn failure', async () => {

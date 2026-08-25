@@ -664,8 +664,10 @@ export interface Config {
   readonly command?: string
   /** Invocation style for the target CLI. */
   readonly cliKind?: CliKind
-  /** Claude Code unattended permission mode; ignored by `agy`. */
+  /** Claude Code unattended permission mode; ignored by `agy` and `codex`. */
   readonly permissionMode?: string
+  /** Codex exec sandbox mode; ignored by `agy` and `claude`. */
+  readonly codexSandbox?: string
   /** Explicit environment layered over the subprocess seam's scrubbed parent environment. */
   readonly env?: Record<string, string>
   /** Grace in milliseconds for subprocess tree termination. */
@@ -679,7 +681,7 @@ export interface Config {
 type CliKind = typeof CLI_KINDS[number]
 ```
 
-来源：[`packages/experimental/agent-team-external-cli/src/index.ts:48`](../packages/experimental/agent-team-external-cli/src/index.ts)
+来源：[`packages/experimental/agent-team-external-cli/src/index.ts:52`](../packages/experimental/agent-team-external-cli/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-tool-agent-team"></a>
 
