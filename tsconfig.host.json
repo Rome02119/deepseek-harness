@@ -190,6 +190,7 @@
     { "path": "./packages/core/tools" },
     { "path": "./packages/core/agent-tool-presentation" },
     { "path": "./packages/skill/skill" },
+    { "path": "./packages/skill/skill-rome" },
     { "path": "./packages/skill/skill-badge" },
     { "path": "./packages/skill/skill-rome" },
     { "path": "./packages/skill/skill-filesystem" },
@@ -313,6 +314,8 @@
     { "path": "./packages/lsp/lsp" },
     { "path": "./packages/lsp/lsp-stdio" },
     { "path": "./packages/lsp/tool-lsp" },
-    { "path": "./apps/cli" }
+    { "path": "./apps/cli" },
+    { "path": "./packages/rome/subscription-quota" },
+    { "path": "./packages/rome/live-agent-view" }
   ]
 }
