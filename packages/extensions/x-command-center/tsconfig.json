@@ -1,0 +1,17 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/session" },
+    { "path": "../../extensions/agent-team-gate" },
+    { "path": "../../host/webserver" },
+    { "path": "../../runtime-diagnostics/invariants" },
+    { "path": "../../subagent/subagent" }
+  ]
+}

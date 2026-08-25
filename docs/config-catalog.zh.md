@@ -3314,6 +3314,22 @@ export interface Config {
 
 来源：[`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages/workflow/workflow-worker-thread/src/index.ts)
 
+<a id="deepseek-aidsh-x-command-center"></a>
+
+## `@deepseek-ai/dsh-x-command-center`
+
+需要：`agents` · `agentTeams` · `subagents` · `webServer`
+
+```ts config-catalog
+/** Command center configuration. */
+export interface Config {
+  /** Milliseconds after the latest session event before an agent is marked stale. */
+  readonly staleAfterMs?: number
+}
+```
+
+来源：[`packages/extensions/x-command-center/src/index.ts:16`](../packages/extensions/x-command-center/src/index.ts)
+
 ## 无配置的可加载插件
 
 这些插件通过 `cordis.yml` 中不含 `config:` 块的条目加载；它们未声明任何配置接口。

@@ -18,15 +18,6 @@
     # live side-by-side view of every working agent  ->  /live-agents
     - id: live-agent-view
       name: '@deepseek-ai/dsh-live-agent-view'
-    # Persistent session-local reminders and owner-scoped PTYs.
-    - id: schedule
-      name: '@deepseek-ai/dsh-schedule'
-    - id: terminal
-      name: '@deepseek-ai/dsh-terminal'
-    - id: terminal-bash
-      name: '@deepseek-ai/dsh-terminal-bash'
-    - id: tool-terminal
-      name: '@deepseek-ai/dsh-tool-terminal'
-    # Browser control page over the existing PTY, Schedule, and Loader APIs.
-    - id: dsh-x-ui
-      name: '@deepseek-ai/dsh-x-ui'
+    # clickable DSH-X command center  ->  /dsh-x-command-center
+    - id: dsh-x-command-center
+      name: '@deepseek-ai/dsh-x-command-center'

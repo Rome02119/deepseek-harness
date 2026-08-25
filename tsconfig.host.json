@@ -316,6 +316,7 @@
     { "path": "./packages/lsp/tool-lsp" },
     { "path": "./apps/cli" },
     { "path": "./packages/extensions/subscription-quota" },
-    { "path": "./packages/extensions/live-agent-view" }
+    { "path": "./packages/extensions/live-agent-view" },
+    { "path": "./packages/extensions/x-command-center" }
   ]
 }

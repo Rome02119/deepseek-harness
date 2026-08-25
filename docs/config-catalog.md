@@ -3312,6 +3312,22 @@ export interface Config {
 
 Source: [`packages/workflow/workflow-worker-thread/src/index.ts:32`](../packages/workflow/workflow-worker-thread/src/index.ts)
 
+<a id="deepseek-aidsh-x-command-center"></a>
+
+## `@deepseek-ai/dsh-x-command-center`
+
+Requires: `agents` · `agentTeams` · `subagents` · `webServer`
+
+```ts config-catalog
+/** Command center configuration. */
+export interface Config {
+  /** Milliseconds after the latest session event before an agent is marked stale. */
+  readonly staleAfterMs?: number
+}
+```
+
+Source: [`packages/extensions/x-command-center/src/index.ts:16`](../packages/extensions/x-command-center/src/index.ts)
+
 ## Loadable plugins with no config
 
 These load from a `cordis.yml` entry with no `config:` block; they declare no configuration API.
