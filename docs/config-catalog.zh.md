@@ -1551,6 +1551,24 @@ export interface Config {
 
 来源：[`packages/feedback/message-feedback/src/index.ts:49`](../packages/feedback/message-feedback/src/index.ts)
 
+<a id="deepseek-aidsh-notebooklm"></a>
+
+## `@deepseek-ai/dsh-notebooklm`
+
+需要：`webServer` · `tools`
+
+```ts config-catalog
+/** Configuration for NotebookLM service. */
+export interface NotebookLMConfig {
+  /** Optional custom path to nlm binary. */
+  nlmPath?: string
+  /** Whether to register model-facing tools on ctx.tools (default true). */
+  registerTools?: boolean
+}
+```
+
+来源：[`packages/extensions/notebooklm/src/index.ts:56`](../packages/extensions/notebooklm/src/index.ts)
+
 <a id="deepseek-aidsh-permission-presets"></a>
 
 ## `@deepseek-ai/dsh-permission-presets`

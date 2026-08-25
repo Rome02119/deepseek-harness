@@ -256,6 +256,62 @@ Types: [Agent](core.zh.md)
 
 Source: [`packages/extensions/cordis-host-runner/src/index.ts`](../../packages/extensions/cordis-host-runner/src/index.ts)
 
+<a id="ctxnotebooklm--notebooklmservice"></a>
+
+### `ctx.notebooklm` — `NotebookLMService`
+
+Service providing Google NotebookLM functionality in DSH-X.
+
+```ts cordis-catalog
+/**
+ * Return the list of notebooks from the local nlm CLI.
+ * @param force - Whether to bypass the in-memory cache.
+ * @returns The list of notebooks.
+ */
+async listNotebooks(force: boolean = false): Promise<NlmNotebook[]>
+
+/**
+ * Return sources for a specific notebook.
+ * @param notebookId - Notebook UUID or alias.
+ * @returns The list of sources in the notebook.
+ */
+async listSources(notebookId: string): Promise<NlmSource[]>
+
+/**
+ * Query a notebook with a question.
+ * @param notebookId - Notebook UUID or alias.
+ * @param question - Question string.
+ * @param conversationId - Optional conversation ID for follow-up turns.
+ * @returns The query answer with citations.
+ */
+async queryNotebook( notebookId: string, question: string, conversationId?: string, ): Promise<NlmQueryResponse>
+
+/**
+ * Create a new notebook.
+ * @param title - Title of the new notebook.
+ * @returns Created notebook metadata.
+ */
+async createNotebook(title: string): Promise<NlmCreateNotebookResponse>
+
+/**
+ * Add a source (URL or text) to a notebook.
+ * @param notebookId - Notebook UUID.
+ * @param type - Source type ('url' or 'text').
+ * @param content - URL or text string.
+ * @param title - Optional title for text source.
+ * @returns Success status and confirmation message.
+ */
+async addSource( notebookId: string, type: 'url' | 'text', content: string, title?: string, ): Promise<{ success: boolean; message: string }>
+
+/**
+ * Check CLI health and authentication.
+ * @returns Health status and auth info.
+ */
+async doctor(): Promise<NlmDoctorResult>
+```
+
+Source: [`packages/extensions/notebooklm/src/index.ts`](../../packages/extensions/notebooklm/src/index.ts)
+
 <a id="cordis-events"></a>
 
 ### `cordis/*` events

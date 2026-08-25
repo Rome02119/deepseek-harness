@@ -1078,6 +1078,49 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'notebooklm',
+    summary: 'Service providing Google NotebookLM functionality in DSH-X.',
+    description: 'Service providing Google NotebookLM functionality in DSH-X.',
+    methods: [
+      {
+        signature: 'async listNotebooks(force: boolean = false): Promise<NlmNotebook[]>',
+        description: 'Return the list of notebooks from the local nlm CLI.',
+        parameters: [{ name: 'force', description: 'Whether to bypass the in-memory cache.' }],
+        returns: 'The list of notebooks.',
+      },
+      {
+        signature: 'async listSources(notebookId: string): Promise<NlmSource[]>',
+        description: 'Return sources for a specific notebook.',
+        parameters: [{ name: 'notebookId', description: 'Notebook UUID or alias.' }],
+        returns: 'The list of sources in the notebook.',
+      },
+      {
+        signature: 'async queryNotebook( notebookId: string, question: string, conversationId?: string, ): Promise<NlmQueryResponse>',
+        description: 'Query a notebook with a question.',
+        parameters: [{ name: 'notebookId', description: 'Notebook UUID or alias.' }, { name: 'question', description: 'Question string.' }, { name: 'conversationId', description: 'Optional conversation ID for follow-up turns.' }],
+        returns: 'The query answer with citations.',
+      },
+      {
+        signature: 'async createNotebook(title: string): Promise<NlmCreateNotebookResponse>',
+        description: 'Create a new notebook.',
+        parameters: [{ name: 'title', description: 'Title of the new notebook.' }],
+        returns: 'Created notebook metadata.',
+      },
+      {
+        signature: 'async addSource( notebookId: string, type: \'url\' | \'text\', content: string, title?: string, ): Promise<{ success: boolean; message: string }>',
+        description: 'Add a source (URL or text) to a notebook.',
+        parameters: [{ name: 'notebookId', description: 'Notebook UUID.' }, { name: 'type', description: 'Source type (\'url\' or \'text\').' }, { name: 'content', description: 'URL or text string.' }, { name: 'title', description: 'Optional title for text source.' }],
+        returns: 'Success status and confirmation message.',
+      },
+      {
+        signature: 'async doctor(): Promise<NlmDoctorResult>',
+        description: 'Check CLI health and authentication.',
+        parameters: [],
+        returns: 'Health status and auth info.',
+      },
+    ],
+  },
+  {
     key: 'permissionPresets',
     summary: 'Owns the deployment\'s permission presets and their write path.',
     description: 'Owns the deployment\'s permission presets and their write path. Requires a confining `ctx.shell` executor and `ctx.approval`; unmatched knob values are reported as CUSTOM_PRESET, not an error.',
@@ -3792,6 +3835,30 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ModelModalityMap',
     declaration: 'export interface ModelModalityMap {\n    text: \'text\';\n    image: \'image\';\n}',
+  },
+  {
+    name: 'NlmCreateNotebookResponse',
+    declaration: 'export interface NlmCreateNotebookResponse {\n    readonly notebook_id: string;\n    readonly title: string;\n    readonly url?: string | undefined;\n    readonly message?: string | undefined;\n}',
+  },
+  {
+    name: 'NlmDoctorResult',
+    declaration: 'export interface NlmDoctorResult {\n    readonly installed: boolean;\n    readonly version?: string | undefined;\n    readonly cliPath?: string | undefined;\n    readonly authenticated: boolean;\n    readonly profile?: string | undefined;\n    readonly rawOutput: string;\n    readonly error?: string | undefined;\n}',
+  },
+  {
+    name: 'NlmNotebook',
+    declaration: 'export interface NlmNotebook {\n    [key: string]: string | number;\n    readonly id: string;\n    readonly title: string;\n    readonly source_count: number;\n    readonly updated_at: string;\n}',
+  },
+  {
+    name: 'NlmQueryResponse',
+    declaration: 'export interface NlmQueryResponse {\n    readonly answer: string;\n    readonly conversation_id: string;\n    readonly sources_used: readonly string[];\n    readonly citations: Readonly<Record<string, string>>;\n    readonly references: readonly NlmReference[];\n}',
+  },
+  {
+    name: 'NlmReference',
+    declaration: 'export interface NlmReference {\n    [key: string]: string | number;\n    readonly source_id: string;\n    readonly citation_number: number;\n    readonly cited_text: string;\n}',
+  },
+  {
+    name: 'NlmSource',
+    declaration: 'export interface NlmSource {\n    readonly id: string;\n    readonly title: string;\n    readonly type: string;\n    readonly url: string | null;\n}',
   },
   {
     name: 'ObjectJsonSchema',

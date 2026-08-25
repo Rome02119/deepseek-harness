@@ -192,10 +192,8 @@
     { "path": "./packages/skill/skill" },
     { "path": "./packages/skill/skill-rome" },
     { "path": "./packages/skill/skill-badge" },
-    { "path": "./packages/skill/skill-rome" },
     { "path": "./packages/skill/skill-filesystem" },
     { "path": "./packages/skill/tool-skill" },
-    { "path": "./packages/skill/skill-rome" },
     { "path": "./packages/interaction/tool-ask-user" },
     { "path": "./packages/context/agent-instructions" },
     { "path": "./packages/core/agent-loop" },
@@ -296,7 +294,6 @@
     { "path": "./packages/extensions/agent-team-gate" },
     { "path": "./packages/extensions/cordis-host-runner" },
     { "path": "./packages/extensions/tool-cordis" },
-    { "path": "./packages/extensions/agent-team-gate" },
     { "path": "./packages/hooks/hook-protocol" },
     { "path": "./packages/hooks/hooks-claude-code" },
     { "path": "./packages/hooks/hooks-codex" },
@@ -317,6 +314,7 @@
     { "path": "./apps/cli" },
     { "path": "./packages/extensions/subscription-quota" },
     { "path": "./packages/extensions/live-agent-view" },
-    { "path": "./packages/extensions/x-command-center" }
+    { "path": "./packages/extensions/x-command-center" },
+    { "path": "./packages/extensions/notebooklm" }
   ]
 }

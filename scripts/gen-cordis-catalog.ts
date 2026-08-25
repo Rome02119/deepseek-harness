@@ -81,6 +81,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   llm: 'llm-streaming.md',
   lsp: 'lsp.md',
   messageFeedback: 'feedback.md',
+  notebooklm: 'extensions.md',
   permissionPresets: 'permission-presets.md',
   planMode: 'plan.md',
   terminals: 'terminal.md',
@@ -625,6 +626,11 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   WorkflowAgentEndInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowAgentInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowResultInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
+  NlmNotebook: 'NotebookLM notebook metadata is owned by packages/extensions/notebooklm/src/types.ts',
+  NlmSource: 'NotebookLM source document metadata is owned by packages/extensions/notebooklm/src/types.ts',
+  NlmQueryResponse: 'NotebookLM query response contract is owned by packages/extensions/notebooklm/src/types.ts',
+  NlmCreateNotebookResponse: 'NotebookLM creation receipt is owned by packages/extensions/notebooklm/src/types.ts',
+  NlmDoctorResult: 'NotebookLM CLI diagnosis result is owned by packages/extensions/notebooklm/src/types.ts',
 }
 
 /** Repository data policy consumed by the Cordis catalog projector. */
