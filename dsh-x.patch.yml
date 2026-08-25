@@ -3,3 +3,5 @@
       name: '@deepseek-ai/dsh-agent-team-gate'
     - id: skill-rome
       name: '@deepseek-ai/dsh-skill-rome'
+    - id: llm-omniroute
+      name: '@deepseek-ai/dsh-llm-omniroute'

@@ -1053,6 +1053,36 @@ export interface DeepSeekCatalogModel {
 
 来源：[`packages/llm/llm-deepseek/src/index.ts:106`](../packages/llm/llm-deepseek/src/index.ts)
 
+<a id="deepseek-aidsh-llm-omniroute"></a>
+
+## `@deepseek-ai/dsh-llm-omniroute`
+
+需要：`llm`
+
+```ts config-catalog
+/** Runtime configuration for the OmniRoute LLM adapter plugin. */
+export interface Config {
+  /** Registered provider route; defaults to `omniroute`. */
+  provider?: string
+  /** Display name for selectors and the Models page. */
+  displayName?: string
+  /** OpenAI-compatible `/v1` endpoint; defaults to local OmniRoute. */
+  baseURL?: string
+  /** Optional credential reference; omitted sends no Authorization header. */
+  apiKeyEnv?: string
+  /** Catalog request timeout; default ten seconds. */
+  catalogTimeoutMs?: number
+  /** Maximum provider idle time while one stream read is outstanding. */
+  streamIdleTimeoutMs?: number
+  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+  retryPolicy?: RetryPolicyConfig
+}
+```
+
+依赖：[`RetryPolicyConfig`](../packages/llm/llm/src/index.ts)
+
+来源：[`packages/llm/llm-omniroute/src/index.ts:26`](../packages/llm/llm-omniroute/src/index.ts)
+
 <a id="deepseek-aidsh-llm-pi-ai"></a>
 
 ## `@deepseek-ai/dsh-llm-pi-ai`
