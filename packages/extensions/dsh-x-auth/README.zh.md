@@ -18,7 +18,7 @@
 
 ## 请求体上限
 
-`readDshXBody` 读取请求体，上限为 `MAX_REQUEST_BODY_BYTES`（1 MiB），一旦超过便销毁该请求并抛出 `DshXBodyTooLargeError`。DSH-X 路由将该错误映射为 HTTP 413。
+`readDshXBody` 读取请求体，上限为 `MAX_REQUEST_BODY_BYTES`（1 MiB），一旦超过便停止读取：暂停该请求并抛出 `DshXBodyTooLargeError`。DSH-X 路由将该错误映射为 HTTP 413；socket 会存活到该响应结束，随后 Node 因请求未被完整消费而关闭它。
 
 ## Model Experience
 

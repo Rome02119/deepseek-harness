@@ -65,7 +65,7 @@ export function requireDshXAuth(req: IncomingMessage, res: ServerResponse): bool
 
 /**
  * Read an HTTP request body, refusing one larger than {@link MAX_REQUEST_BODY_BYTES}.
- * @param req Incoming request consumed as a stream; destroyed as soon as the cap is passed.
+ * @param req Incoming request consumed as a stream; paused as soon as the cap is passed, leaving the caller to answer 413.
  * @returns The complete body bytes.
  * @throws DshXBodyTooLargeError once the received bytes exceed the cap.
  */
@@ -76,7 +76,9 @@ export async function readDshXBody(req: IncomingMessage): Promise<Buffer> {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string)
     bytes += buffer.length
     if (bytes > MAX_REQUEST_BODY_BYTES) {
-      req.destroy()
+      // Pause rather than destroy: the socket must survive long enough for the
+      // route to write its 413, and Node closes it once that response ends.
+      req.pause()
       throw new DshXBodyTooLargeError()
     }
     chunks.push(buffer)
