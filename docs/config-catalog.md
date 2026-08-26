@@ -2596,6 +2596,26 @@ export type ShellDialect = 'bash' | 'pwsh'
 
 Source: [`packages/terminal/terminal-bash/src/config.ts:10`](../packages/terminal/terminal-bash/src/config.ts)
 
+<a id="deepseek-aidsh-terminal-herdr"></a>
+
+## `@deepseek-ai/dsh-terminal-herdr`
+
+Requires: `terminals`
+
+```ts config-catalog
+/** Provider configuration. */
+export interface Config {
+  /** herdr executable path. */
+  command: string
+  /** Label used to find or create a workspace for this provider. */
+  workspaceLabel: string
+  /** Delay before reading output after a submitted command. */
+  readDelayMs: number
+}
+```
+
+Source: [`packages/extensions/terminal-herdr/src/index.ts:23`](../packages/extensions/terminal-herdr/src/index.ts)
+
 <a id="deepseek-aidsh-time-context"></a>
 
 ## `@deepseek-ai/dsh-time-context`

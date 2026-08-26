@@ -317,6 +317,7 @@
     { "path": "./packages/extensions/x-command-center" },
     { "path": "./packages/extensions/notebooklm" },
     { "path": "./packages/extensions/dsh-x-ui" },
-    { "path": "./packages/extensions/ego-browser" }
+    { "path": "./packages/extensions/ego-browser" },
+    { "path": "./packages/extensions/terminal-herdr" }
   ]
 }

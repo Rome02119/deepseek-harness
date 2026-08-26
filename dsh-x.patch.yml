@@ -21,6 +21,9 @@
     # terminal panes, cron jobs, plugin manager  ->  /dsh-x
     - id: dsh-x-ui
       name: '@deepseek-ai/dsh-x-ui'
+    # herdr-backed terminal provider for the DSH-X terminal pane
+    - id: terminal-herdr
+      name: '@deepseek-ai/dsh-terminal-herdr'
     # terminal registry/backend required by the DSH-X terminal pane
     - id: terminal
       name: '@deepseek-ai/dsh-terminal'

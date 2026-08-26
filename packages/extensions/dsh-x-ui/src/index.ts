@@ -150,7 +150,8 @@ export class DshXUiService extends Service {
 
   private async openTerminal(body: JsonRecord): Promise<unknown> {
     const name = optionalString(body, 'name')
-    return this.ctx.terminals.spawn(this.agent(body), { type: 'shell', ...name === undefined ? {} : { name } })
+    const type = optionalString(body, 'type') ?? (this.ctx.terminals.listBackends().includes('herdr') ? 'herdr' : 'shell')
+    return this.ctx.terminals.spawn(this.agent(body), { type, ...name === undefined ? {} : { name } })
   }
 
   private async sendTerminal(body: JsonRecord): Promise<unknown> {
