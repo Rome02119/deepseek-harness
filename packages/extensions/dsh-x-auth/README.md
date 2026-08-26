@@ -18,7 +18,7 @@ A token arriving as `?token=` on a `GET` is answered with a 302 to the same path
 
 ## Request-body cap
 
-`readDshXBody` reads a request body up to `MAX_REQUEST_BODY_BYTES` (1 MiB) and destroys the request as soon as that is passed, throwing `DshXBodyTooLargeError`. DSH-X routes map that error to HTTP 413.
+`readDshXBody` reads a request body up to `MAX_REQUEST_BODY_BYTES` (1 MiB) and stops reading as soon as that is passed, pausing the request and throwing `DshXBodyTooLargeError`. DSH-X routes map that error to HTTP 413; the socket survives until that response ends, then Node closes it because the request was never fully consumed.
 
 ## Model Experience
 
