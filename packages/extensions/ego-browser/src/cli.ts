@@ -12,6 +12,40 @@ import type { EgoNavigateResult, EgoTaskSpace } from './types.ts'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const MAX_OUTPUT_BYTES = 5_000_000
+/** Upper bound for the short discovery probes so status() can never hang. */
+const PROBE_TIMEOUT_MS = 3_000
+
+/**
+ * Run a short discovery probe, bounded so a wedged binary cannot hang the caller.
+ *
+ * @param command - Executable to run.
+ * @param args - Arguments passed to the executable.
+ * @param timeoutMs - Upper bound before the child is killed.
+ * @returns Trimmed stdout on a clean exit, otherwise undefined.
+ */
+function probe(command: string, args: readonly string[], timeoutMs: number): Promise<string | undefined> {
+  return new Promise<string | undefined>((resolve) => {
+    const child = spawn(command, [...args], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let stdout = ''
+    let settled = false
+    const finish = (value?: string): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(value)
+    }
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      finish()
+    }, timeoutMs)
+    timer.unref()
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => { stdout += chunk })
+    child.on('close', (code) => { finish(code === 0 && stdout.trim().length > 0 ? stdout.trim() : undefined) })
+    child.on('error', () => { finish() })
+  })
+}
+
 
 /** Standard candidate paths where ego-browser might be installed. */
 function candidatePaths(customPath?: string): string[] {
@@ -82,19 +116,8 @@ export async function isEgoAvailable(customPath?: string): Promise<boolean> {
  *
  * @returns Whether the Ego Lite desktop application is currently running.
  */
-export async function isEgoAppRunning(): Promise<boolean> {
-  return new Promise<boolean>((resolve) => {
-    const child = spawn('pgrep', ['-f', 'ego lite'], { stdio: ['ignore', 'pipe', 'ignore'] })
-    let output = ''
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => { output += chunk })
-    child.on('close', (code) => {
-      resolve(code === 0 && output.trim().length > 0)
-    })
-    child.on('error', () => {
-      resolve(false)
-    })
-  })
+export async function isEgoAppRunning(timeoutMs: number = PROBE_TIMEOUT_MS): Promise<boolean> {
+  return await probe('pgrep', ['-f', 'ego lite'], timeoutMs) !== undefined
 }
 
 /**
@@ -103,25 +126,10 @@ export async function isEgoAppRunning(): Promise<boolean> {
  * @param customPath - Optional explicit path candidate.
  * @returns Cleaned version string or undefined.
  */
-export async function getEgoVersion(customPath?: string): Promise<string | undefined> {
+export async function getEgoVersion(customPath?: string, timeoutMs: number = PROBE_TIMEOUT_MS): Promise<string | undefined> {
   const bin = await findEgoBinary(customPath)
   if (!bin) return undefined
-  return new Promise<string | undefined>((resolve) => {
-    const child = spawn(bin, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] })
-    let stdout = ''
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => { stdout += chunk })
-    child.on('close', (code) => {
-      if (code === 0 && stdout.trim().length > 0) {
-        resolve(stdout.trim())
-      } else {
-        resolve(undefined)
-      }
-    })
-    child.on('error', () => {
-      resolve(undefined)
-    })
-  })
+  return probe(bin, ['--version'], timeoutMs)
 }
 
 /**
@@ -312,20 +320,5 @@ try {
 
 /** Resolve executable on PATH using `which`. */
 function which(cmd: string): Promise<string | undefined> {
-  return new Promise<string | undefined>((resolve) => {
-    const child = spawn('which', [cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
-    let stdout = ''
-    child.stdout.setEncoding('utf8')
-    child.stdout.on('data', (chunk: string) => { stdout += chunk })
-    child.on('close', (code) => {
-      if (code === 0 && stdout.trim().length > 0) {
-        resolve(stdout.trim())
-      } else {
-        resolve(undefined)
-      }
-    })
-    child.on('error', () => {
-      resolve(undefined)
-    })
-  })
+  return probe('which', [cmd], PROBE_TIMEOUT_MS)
 }

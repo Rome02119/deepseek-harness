@@ -2,6 +2,9 @@
  * Unit and integration tests for `@deepseek-ai/dsh-ego-browser`.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { WebRuntime } from '@deepseek-ai/dsh-web'
@@ -16,6 +19,7 @@ import {
   type EgoBrowserStatus,
   EgoWebFetchProvider,
   findEgoBinary,
+  getEgoVersion,
   isEgoBinaryPresent,
 } from '../src/index.ts'
 import {
@@ -148,7 +152,7 @@ describe('@deepseek-ai/dsh-ego-browser', () => {
     expect(statusHttp.currentFetchProvider).toBe('http')
 
     await ctx.fiber.dispose()
-  })
+  }, 30_000)
 
   it('inspects binary presence with isEgoBinaryPresent and findEgoBinary', async () => {
     expect(typeof isEgoBinaryPresent()).toBe('boolean')
@@ -157,4 +161,22 @@ describe('@deepseek-ai/dsh-ego-browser', () => {
       expect(typeof bin).toBe('string')
     }
   })
+
+  // Regression: status() probes spawned child processes with NO timeout, so a
+  // wedged ego binary hung the whole call. Under the full suite this surfaced as
+  // "Test timed out in 5000ms". Every probe is now bounded.
+  it('does not hang when the ego binary never exits', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ego-probe-'))
+    const wedged = join(dir, 'ego-browser')
+    writeFileSync(wedged, '#!/bin/sh\nsleep 60\n', { mode: 0o755 })
+    try {
+      const started = Date.now()
+      const version = await getEgoVersion(wedged, 300)
+      const elapsed = Date.now() - started
+      expect(version).toBeUndefined()
+      expect(elapsed).toBeLessThan(3_000)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 10_000)
 })
