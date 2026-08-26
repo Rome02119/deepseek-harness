@@ -56,9 +56,12 @@ export async function findNlmBinary(customPath?: string): Promise<string> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => { controller.abort() }, 3000)
-    await runNativeCommand('nlm', ['--version'], controller.signal)
-    clearTimeout(timer)
-    return 'nlm'
+    try {
+      await runNativeCommand('nlm', ['--version'], controller.signal)
+      return 'nlm'
+    } finally {
+      clearTimeout(timer)
+    }
   } catch {
     // If not found in PATH or standard dirs, return the primary candidate for descriptive error reporting
     return candidates[0] ?? '/Users/rome/.local/bin/nlm'

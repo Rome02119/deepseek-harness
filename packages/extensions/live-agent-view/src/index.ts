@@ -5,6 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-team-gate'
 import type { ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { dshXAuth } from '@deepseek-ai/dsh-x-auth'
 
 /** One row displayed by the live-agent view. */
 export interface LiveAgentRow {
@@ -92,18 +93,18 @@ export class LiveAgentViewService extends Service {
   [Service.init](): void {
     const json: WebRoute = {
       kind: 'exact', path: '/live-agents.json',
-      handler: (_req, res) => { sendJson(res, this.snapshot()) },
+      handler: dshXAuth((_req, res) => { sendJson(res, this.snapshot()) }),
     }
     const events: WebRoute = {
       kind: 'exact', path: '/live-agents/events',
-      handler: (_req, res) => { this.openEvents(res) },
+      handler: dshXAuth((_req, res) => { this.openEvents(res) }),
     }
     const page: WebRoute = {
       kind: 'exact', path: '/live-agents',
-      handler: (_req, res) => {
+      handler: dshXAuth((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
         res.end(PAGE)
-      },
+      }),
     }
     this.ctx.effect(() => this.ctx.webServer.register(json), 'rome-live-agent-view: json')
     this.ctx.effect(() => this.ctx.webServer.register(events), 'rome-live-agent-view: events')
@@ -118,6 +119,7 @@ export class LiveAgentViewService extends Service {
     })
     this.clients.add(res)
     res.once('close', () => { this.clients.delete(res) })
+    res.once('error', () => { this.clients.delete(res) })
     this.write(res)
   }
 

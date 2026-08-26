@@ -1565,7 +1565,7 @@ export interface NotebookLMConfig {
 }
 ```
 
-Source: [`packages/extensions/notebooklm/src/index.ts:63`](../packages/extensions/notebooklm/src/index.ts)
+Source: [`packages/extensions/notebooklm/src/index.ts:64`](../packages/extensions/notebooklm/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -3344,7 +3344,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/extensions/x-command-center/src/index.ts:16`](../packages/extensions/x-command-center/src/index.ts)
+Source: [`packages/extensions/x-command-center/src/index.ts:17`](../packages/extensions/x-command-center/src/index.ts)
 
 ## Loadable plugins with no config
 
@@ -3482,3 +3482,4 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-typert-generator` ([`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts))
 - `@deepseek-ai/dsh-typert-protocol` ([`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts))
 - `@deepseek-ai/dsh-typert-registry` ([`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts))
+- `@deepseek-ai/dsh-x-auth` ([`packages/extensions/dsh-x-auth/src/index.ts`](../packages/extensions/dsh-x-auth/src/index.ts))

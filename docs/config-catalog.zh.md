@@ -1567,7 +1567,7 @@ export interface NotebookLMConfig {
 }
 ```
 
-来源：[`packages/extensions/notebooklm/src/index.ts:56`](../packages/extensions/notebooklm/src/index.ts)
+来源：[`packages/extensions/notebooklm/src/index.ts:64`](../packages/extensions/notebooklm/src/index.ts)
 
 <a id="deepseek-aidsh-permission-presets"></a>
 
@@ -3346,7 +3346,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/extensions/x-command-center/src/index.ts:16`](../packages/extensions/x-command-center/src/index.ts)
+来源：[`packages/extensions/x-command-center/src/index.ts:17`](../packages/extensions/x-command-center/src/index.ts)
 
 ## 无配置的可加载插件
 
@@ -3483,3 +3483,4 @@ export interface Config {
 - `@deepseek-ai/dsh-typert-generator`（[`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts)）
 - `@deepseek-ai/dsh-typert-protocol`（[`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts)）
 - `@deepseek-ai/dsh-typert-registry`（[`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts)）
+- `@deepseek-ai/dsh-x-auth`（[`packages/extensions/dsh-x-auth/src/index.ts`](../packages/extensions/dsh-x-auth/src/index.ts)）

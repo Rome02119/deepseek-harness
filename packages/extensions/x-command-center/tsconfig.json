@@ -6,6 +6,7 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../dsh-x-auth" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../core/agent" },
     { "path": "../../core/session" },

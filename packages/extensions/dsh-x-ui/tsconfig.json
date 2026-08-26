@@ -6,6 +6,7 @@
   },
   "include": ["src"],
   "references": [
+    { "path": "../dsh-x-auth" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/loader" },
     { "path": "../../core/agent" },

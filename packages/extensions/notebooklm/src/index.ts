@@ -8,6 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { DshXBodyTooLargeError, dshXAuth, readDshXBody } from '@deepseek-ai/dsh-x-auth'
 import {
   addSourceText,
   addSourceUrl,
@@ -177,16 +178,16 @@ export class NotebookLMService extends Service {
     const pageRoute: WebRoute = {
       kind: 'exact',
       path: '/notebooklm',
-      handler: (_req, res) => {
+      handler: dshXAuth((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
         res.end(NOTEBOOKLM_PAGE)
-      },
+      }),
     }
 
     const notebooksApiRoute: WebRoute = {
       kind: 'exact',
       path: '/notebooklm/api/notebooks',
-      handler: async (req, res) => {
+      handler: dshXAuth(async (req, res) => {
         if (req.method === 'POST') {
           try {
             const body = await readJsonBody<{ title?: string }>(req)
@@ -198,7 +199,7 @@ export class NotebookLMService extends Service {
             const created = await this.createNotebook(body.title.trim())
             sendJson(res, 200, created)
           } catch (err) {
-            sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+            sendJson(res, err instanceof DshXBodyTooLargeError ? 413 : 500, { error: err instanceof Error ? err.message : String(err) })
           }
           return
         }
@@ -225,13 +226,13 @@ export class NotebookLMService extends Service {
             cliPath,
           })
         }
-      },
+      }),
     }
 
     const queryApiRoute: WebRoute = {
       kind: 'exact',
       path: '/notebooklm/api/query',
-      handler: async (req, res) => {
+      handler: dshXAuth(async (req, res) => {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'Method not allowed' })
           return
@@ -251,15 +252,15 @@ export class NotebookLMService extends Service {
           const response = await this.queryNotebook(body.notebookId, body.question, body.conversationId)
           sendJson(res, 200, response)
         } catch (err) {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+          sendJson(res, err instanceof DshXBodyTooLargeError ? 413 : 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     const addSourceApiRoute: WebRoute = {
       kind: 'exact',
       path: '/notebooklm/api/sources',
-      handler: async (req, res) => {
+      handler: dshXAuth(async (req, res) => {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'Method not allowed' })
           return
@@ -280,22 +281,22 @@ export class NotebookLMService extends Service {
           const added = await this.addSource(body.notebookId, body.type, body.content, body.title)
           sendJson(res, 200, added)
         } catch (err) {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+          sendJson(res, err instanceof DshXBodyTooLargeError ? 413 : 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     const doctorApiRoute: WebRoute = {
       kind: 'exact',
       path: '/notebooklm/api/doctor',
-      handler: async (_req, res) => {
+      handler: dshXAuth(async (_req, res) => {
         try {
           const doc = await this.doctor()
           sendJson(res, 200, doc)
         } catch (err) {
           sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     this.ctx.effect(() => this.ctx.webServer.register(pageRoute), 'notebooklm: page route')
@@ -307,15 +308,7 @@ export class NotebookLMService extends Service {
 }
 
 async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of req) {
-    if (typeof chunk === 'string') {
-      chunks.push(Buffer.from(chunk))
-    } else if (chunk instanceof Uint8Array) {
-      chunks.push(chunk)
-    }
-  }
-  const text = Buffer.concat(chunks).toString('utf8')
+  const text = (await readDshXBody(req)).toString('utf8')
   if (text.trim().length === 0) return {} as T
   return JSON.parse(text) as T
 }

@@ -11,6 +11,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-subagent'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { DshXBodyTooLargeError, dshXAuth, readDshXBody } from '@deepseek-ai/dsh-x-auth'
 
 /** Command center configuration. */
 export interface Config {
@@ -155,18 +156,18 @@ export class DshXCommandCenterService extends Service {
   [Service.init](): void {
     const page: WebRoute = {
       kind: 'exact', path: ROUTE,
-      handler: (_req, res) => {
+      handler: dshXAuth((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
         res.end(PAGE)
-      },
+      }),
     }
     const json: WebRoute = {
       kind: 'exact', path: JSON_ROUTE,
-      handler: (_req, res) => { sendJson(res, 200, this.snapshot()) },
+      handler: dshXAuth((_req, res) => { sendJson(res, 200, this.snapshot()) }),
     }
     const actions: WebRoute = {
       kind: 'exact', path: ACTION_ROUTE,
-      handler: (req, res) => { void this.handleAction(req, res) },
+      handler: dshXAuth((req, res) => { void this.handleAction(req, res) }),
     }
     this.ctx.effect(() => this.ctx.webServer.register(page), 'dsh-x-command-center: page')
     this.ctx.effect(() => this.ctx.webServer.register(json), 'dsh-x-command-center: json')
@@ -184,7 +185,7 @@ export class DshXCommandCenterService extends Service {
       sendJson(res, 200, { ok: true, timestamp: nowIso(), ...output })
     } catch (error: unknown) {
       const { code, message } = errorInfo(error)
-      sendJson(res, 409, { ok: false, code, message, timestamp: nowIso() })
+      sendJson(res, error instanceof DshXBodyTooLargeError ? 413 : 409, { ok: false, code, message, timestamp: nowIso() })
     }
   }
 
@@ -400,11 +401,7 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  for await (const chunk of req as AsyncIterable<Buffer | string>) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+  return JSON.parse((await readDshXBody(req)).toString('utf8')) as unknown
 }
 
 export default DshXCommandCenterService
