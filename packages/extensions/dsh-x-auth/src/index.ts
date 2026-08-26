@@ -18,10 +18,14 @@ export type DshXHandler = (req: IncomingMessage, res: ServerResponse) => void | 
 
 /**
  * Wrap one route handler with the DSH-X authentication check.
+ * Resolving the token here materialises `~/.dsh-x/token` at route registration, which is DSH-X boot.
  * @param handler Runs only for an authorized request; an unauthorized request is answered by the guard.
  * @returns A handler answering 401 (or a cookie-setting redirect) instead of delegating when unauthorized.
  */
 export function dshXAuth(handler: DshXHandler): DshXHandler {
+  // Route registration is DSH-X boot, and the token file has to exist by then:
+  // it is the only place the tokenised link can be read from.
+  dshXToken()
   return (req, res) => {
     if (requireDshXAuth(req, res)) return handler(req, res)
   }

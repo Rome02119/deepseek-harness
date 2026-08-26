@@ -14,7 +14,7 @@ A token arriving as `?token=` on a `GET` is answered with a 302 to the same path
 
 ## Token source
 
-`DSH_X_TOKEN` overrides everything when set to a non-empty value. Otherwise the token is read from `~/.dsh-x/token`, which is created on first use with 32 random bytes as hex, directory mode `0700` and file mode `0600`. The file is never written inside the repository.
+`DSH_X_TOKEN` overrides everything when set to a non-empty value. Otherwise the token is read from `~/.dsh-x/token`. `dshXAuth` resolves it when a route is registered, so the file exists from DSH-X boot onward and the tokenised link can be built from it; it holds 32 random bytes as hex, under directory mode `0700` and file mode `0600`. The file is never written inside the repository.
 
 ## Request-body cap
 
