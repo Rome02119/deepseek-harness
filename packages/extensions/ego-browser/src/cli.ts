@@ -114,6 +114,7 @@ export async function isEgoAvailable(customPath?: string): Promise<boolean> {
 /**
  * Check if the Ego Lite app is currently running.
  *
+ * @param timeoutMs - Upper bound for the probe before it is killed.
  * @returns Whether the Ego Lite desktop application is currently running.
  */
 export async function isEgoAppRunning(timeoutMs: number = PROBE_TIMEOUT_MS): Promise<boolean> {
@@ -124,6 +125,7 @@ export async function isEgoAppRunning(timeoutMs: number = PROBE_TIMEOUT_MS): Pro
  * Get version output from ego-browser CLI.
  *
  * @param customPath - Optional explicit path candidate.
+ * @param timeoutMs - Upper bound for the probe before it is killed.
  * @returns Cleaned version string or undefined.
  */
 export async function getEgoVersion(customPath?: string, timeoutMs: number = PROBE_TIMEOUT_MS): Promise<string | undefined> {
@@ -237,7 +239,12 @@ export async function runEgoScript(
   })
 }
 
-/** List all task spaces currently active in ego-browser. */
+/**
+ * List all task spaces currently active in ego-browser.
+ *
+ * @param options - Binary path and timeout overrides.
+ * @returns Active task spaces, or an empty list when ego-browser is unavailable.
+ */
 export async function listTaskSpaces(
   options: { customPath?: string; timeoutMs?: number } = {},
 ): Promise<EgoTaskSpace[]> {
