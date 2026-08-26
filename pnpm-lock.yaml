@@ -4392,6 +4392,15 @@ importers:
         specifier: workspace:^
         version: link:../../typert/protocol
 
+  packages/extensions/dsh-x-auth:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
+
   packages/extensions/dsh-x-ui:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -4418,6 +4427,9 @@ importers:
       '@deepseek-ai/dsh-terminal':
         specifier: workspace:^
         version: link:../../terminal/terminal
+      '@deepseek-ai/dsh-x-auth':
+        specifier: workspace:^
+        version: link:../dsh-x-auth
 
   packages/extensions/ego-browser:
     dependencies:
@@ -4461,6 +4473,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-x-auth':
+        specifier: workspace:^
+        version: link:../dsh-x-auth
 
   packages/extensions/notebooklm:
     dependencies:
@@ -4483,6 +4498,9 @@ importers:
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools
+      '@deepseek-ai/dsh-x-auth':
+        specifier: workspace:^
+        version: link:../dsh-x-auth
 
   packages/extensions/subscription-quota:
     devDependencies:
@@ -4635,6 +4653,9 @@ importers:
       '@deepseek-ai/dsh-subagent-spawn-in-process':
         specifier: workspace:^
         version: link:../../subagent/subagent-spawn-in-process
+      '@deepseek-ai/dsh-x-auth':
+        specifier: workspace:^
+        version: link:../dsh-x-auth
 
   packages/feedback/command-feedback:
     devDependencies:

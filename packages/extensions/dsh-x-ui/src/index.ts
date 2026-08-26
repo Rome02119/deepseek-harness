@@ -5,6 +5,7 @@ import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { DshXBodyTooLargeError, dshXAuth, readDshXBody } from '@deepseek-ai/dsh-x-auth'
 import {
   allocateScheduleId,
   createAfterScheduleRecord,
@@ -58,6 +59,9 @@ setInterval(()=>{if($('#terminal').classList.contains('active')){loadState().the
 
 type JsonRecord = Record<string, unknown>
 
+/** Maximum concurrently retained shell sessions across all agents. */
+export const MAX_CONCURRENT_PTYS = 8
+
 /** Host services required by the control page. */
 export const inject = ['agents', 'loader', 'sessions', 'terminals', 'webServer']
 
@@ -72,23 +76,23 @@ export class DshXUiService extends Service {
   /** Register the page and JSON actions. */
   [Service.init](): void {
     const routes: WebRoute[] = [
-      { kind: 'exact', path: '/dsh-x', handler: (_req, res) => { this.page(res) } },
-      { kind: 'exact', path: '/dsh-x/api/state', handler: (_req, res) => { this.state(res) } },
-      { kind: 'exact', path: '/dsh-x/api/terminal/read', handler: (req, res) => { this.readTerminal(req, res) } },
-      { kind: 'exact', path: '/dsh-x/api/terminal/open', handler: (req, res) => this.jsonAction(req, res, body => this.openTerminal(body)) },
-      { kind: 'exact', path: '/dsh-x/api/terminal/send', handler: (req, res) => this.jsonAction(req, res, body => this.sendTerminal(body)) },
-      { kind: 'exact', path: '/dsh-x/api/terminal/close', handler: (req, res) => this.jsonAction(req, res, body => this.closeTerminal(body)) },
-      { kind: 'exact', path: '/dsh-x/api/schedule', handler: (req, res) => {
+      { kind: 'exact', path: '/dsh-x', handler: dshXAuth((_req, res) => { this.page(res) }) },
+      { kind: 'exact', path: '/dsh-x/api/state', handler: dshXAuth((_req, res) => { this.state(res) }) },
+      { kind: 'exact', path: '/dsh-x/api/terminal/read', handler: dshXAuth((req, res) => { this.readTerminal(req, res) }) },
+      { kind: 'exact', path: '/dsh-x/api/terminal/open', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.openTerminal(body))) },
+      { kind: 'exact', path: '/dsh-x/api/terminal/send', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.sendTerminal(body))) },
+      { kind: 'exact', path: '/dsh-x/api/terminal/close', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.closeTerminal(body))) },
+      { kind: 'exact', path: '/dsh-x/api/schedule', handler: dshXAuth((req, res) => {
         if (req.method === 'POST') return this.jsonAction(req, res, body => this.createSchedule(body))
         this.scheduleList(req, res)
-      } },
-      { kind: 'exact', path: '/dsh-x/api/schedule/delete', handler: (req, res) => this.jsonAction(req, res, body => this.deleteSchedule(body)) },
-      { kind: 'exact', path: '/dsh-x/api/plugins/add', handler: (req, res) => this.jsonAction(req, res, body => this.addPlugin(body)) },
-      { kind: 'exact', path: '/dsh-x/api/plugins/toggle', handler: (req, res) => this.jsonAction(req, res, body => this.togglePlugin(body)) },
-      { kind: 'exact', path: '/dsh-x/api/plugins/remove', handler: (req, res) => this.jsonAction(req, res, body => this.removePlugin(body)) },
-      { kind: 'exact', path: '/dsh-x/api/browser', handler: (_req, res) => { this.browserState(res) } },
-      { kind: 'exact', path: '/dsh-x/api/browser/select', handler: (req, res) => this.jsonAction(req, res, body => this.selectBrowser(body)) },
-      { kind: 'exact', path: '/dsh-x/api/browser/launch', handler: (req, res) => this.jsonAction(req, res, body => this.launchBrowser(body)) },
+      }) },
+      { kind: 'exact', path: '/dsh-x/api/schedule/delete', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.deleteSchedule(body))) },
+      { kind: 'exact', path: '/dsh-x/api/plugins/add', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.addPlugin(body))) },
+      { kind: 'exact', path: '/dsh-x/api/plugins/toggle', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.togglePlugin(body))) },
+      { kind: 'exact', path: '/dsh-x/api/plugins/remove', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.removePlugin(body))) },
+      { kind: 'exact', path: '/dsh-x/api/browser', handler: dshXAuth((_req, res) => { this.browserState(res) }) },
+      { kind: 'exact', path: '/dsh-x/api/browser/select', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.selectBrowser(body))) },
+      { kind: 'exact', path: '/dsh-x/api/browser/launch', handler: dshXAuth((req, res) => this.jsonAction(req, res, body => this.launchBrowser(body))) },
     ]
     this.ctx.effect(() => {
       const disposers = routes.map(route => this.ctx.webServer.register(route))
@@ -149,6 +153,10 @@ export class DshXUiService extends Service {
   }
 
   private async openTerminal(body: JsonRecord): Promise<unknown> {
+    if (this.agents().flatMap(agent => this.ctx.terminals.list(agent)).filter(session => session.status.kind === 'running').length >= MAX_CONCURRENT_PTYS) {
+      const error = Object.assign(new Error('too many open PTYs'), { status: 429 })
+      throw error
+    }
     const name = optionalString(body, 'name')
     const type = optionalString(body, 'type') ?? (this.ctx.terminals.listBackends().includes('herdr') ? 'herdr' : 'shell')
     return this.ctx.terminals.spawn(this.agent(body), { type, ...name === undefined ? {} : { name } })
@@ -237,12 +245,8 @@ export class DshXUiService extends Service {
 
   private entry(body: JsonRecord): Entry { const id = stringField(body, 'entryId'); return this.ctx.loader.resolve(id) }
 
-  private async jsonAction(
-    req: IncomingMessage,
-    res: ServerResponse,
-    action: (body: JsonRecord) => unknown,
-  ): Promise<void> {
-    try { sendJson(res, await action(await readJson(req))) } catch (error: unknown) { res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })) }
+  private async jsonAction(req: IncomingMessage, res: ServerResponse, action: (body: JsonRecord) => Promise<unknown>): Promise<void> {
+    try { sendJson(res, await action(await readJson(req))) } catch (error: unknown) { res.writeHead(error instanceof DshXBodyTooLargeError ? 413 : (error as { status?: number }).status ?? 400, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })) }
   }
 }
 
@@ -252,7 +256,7 @@ function optionalString(body: JsonRecord, key: string): string | undefined {
   return value === undefined ? undefined : stringField(body, key)
 }
 function numberField(body: JsonRecord, key: string): number { const value = body[key]; if (typeof value !== 'number') throw new Error(`${key} must be a number`); return value }
-async function readJson(req: IncomingMessage): Promise<JsonRecord> { let text = ''; for await (const chunk of req) { text += String(chunk); if (text.length > 64_000) throw new Error('request body too large') } const value: unknown = JSON.parse(text); if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request body must be an object'); return value as JsonRecord }
+async function readJson(req: IncomingMessage): Promise<JsonRecord> { const value: unknown = JSON.parse((await readDshXBody(req)).toString('utf8')); if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('request body must be an object'); return value as JsonRecord }
 function sendJson(res: ServerResponse, value: unknown): void { res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(value)) }
 
 /** Loader plugin entry point. */

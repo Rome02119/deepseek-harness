@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Google NotebookLM integration for DSH-X via the local `nlm` CLI. The package provides a browser management page at `/notebooklm`, JSON API endpoints, and model-facing agent tools (`notebooklm_query`, `notebooklm_list`) registered on `ctx.tools`.
 
+The page exposes remote notebook creation and source-mutation endpoints. Every route requires the DSH-X token outside loopback; open the tokenised DSH-X link once to establish its HttpOnly cookie.
+
 ## Web and API routes
 
 - `GET /notebooklm` — Interactive notebook cards, search filter, responsive Q&A chat drawer, source viewer, and notebook creation.

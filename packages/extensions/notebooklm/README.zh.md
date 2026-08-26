@@ -4,6 +4,8 @@
 
 通过本地 `nlm` CLI 实现的 Google NotebookLM 与 DSH-X 集成。本包提供位于 `/notebooklm` 的浏览器管理页面、JSON API 端点，以及在 `ctx.tools` 上注册的模型侧智能体工具（`notebooklm_query`、`notebooklm_list`）。
 
+该页面提供远程笔记本创建和源文件变更端点。除回环请求外，每条路由都要求 DSH-X 令牌；打开一次带令牌的 DSH-X 链接即可建立其 HttpOnly cookie。
+
 ## Web 与 API 路由
 
 - `GET /notebooklm` — 交互式笔记本卡片网格、搜索筛选、响应式问答抽屉、源查看器以及新建笔记本功能。

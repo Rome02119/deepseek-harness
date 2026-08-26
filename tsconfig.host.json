@@ -313,6 +313,8 @@
     { "path": "./packages/lsp/tool-lsp" },
     { "path": "./apps/cli" },
     { "path": "./packages/extensions/subscription-quota" },
+    { "path": "./packages/extensions/dsh-x-auth" },
+    { "path": "./packages/extensions/dsh-x-ui" },
     { "path": "./packages/extensions/live-agent-view" },
     { "path": "./packages/extensions/x-command-center" },
     { "path": "./packages/extensions/notebooklm" },

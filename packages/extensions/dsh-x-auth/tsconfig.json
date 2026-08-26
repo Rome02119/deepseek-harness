@@ -6,10 +6,7 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../dsh-x-auth" },
-    { "path": "../../core/agent" },
-    { "path": "../../extensions/agent-team-gate" },
-    { "path": "../../host/webserver" },
+    { "path": "../../../vendor/cordis" },
     { "path": "../../runtime-diagnostics/invariants" }
   ]
 }
