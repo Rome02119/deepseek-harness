@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-The DSH-X control page at `/dsh-x` makes the existing PTY, session-log Schedule, and Cordis Loader services usable from a browser. The Terminal tab opens, reads, and sends text to an Agent-owned persistent PTY; it does not attach to the agent loop's model-session stdin. The Schedule tab creates, lists, and deletes session-local reminders with their durable last-dispatch and next-target timestamps. The Plugins tab uses Loader `create`, `update`, and `remove` for real add/enable/disable/remove operations.
+The DSH-X control page at `/dsh-x` makes the existing PTY, session-log Schedule, and Cordis Loader services usable from a browser. The Terminal tab opens, reads, and sends text to an Agent-owned persistent PTY; it does not attach to the agent loop's model-session stdin. The Schedule tab creates, lists, and deletes session-local reminders with their durable last-dispatch and next-target timestamps. The Plugins tab uses Loader `create`, `update`, and `remove` for real add/enable/disable/remove operations. The Browser tab keeps the system browser as the default and can persist an available local `ego-browser` selection; an absent executable is disabled with its reason.
 
 The page is intentionally a same-origin Host surface. It is for the local DSH-X deployment and does not claim to provide a remote authentication layer.
 

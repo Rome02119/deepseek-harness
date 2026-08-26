@@ -315,6 +315,8 @@
     { "path": "./packages/extensions/subscription-quota" },
     { "path": "./packages/extensions/live-agent-view" },
     { "path": "./packages/extensions/x-command-center" },
-    { "path": "./packages/extensions/notebooklm" }
+    { "path": "./packages/extensions/notebooklm" },
+    { "path": "./packages/extensions/dsh-x-ui" },
+    { "path": "./packages/extensions/ego-browser" }
   ]
 }

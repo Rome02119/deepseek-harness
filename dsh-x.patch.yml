@@ -32,3 +32,6 @@
     # rome's NotebookLM notebooks  ->  /notebooklm
     - id: notebooklm
       name: '@deepseek-ai/dsh-notebooklm'
+    # ego-browser integration  ->  /ego-browser
+    - id: ego-browser
+      name: '@deepseek-ai/dsh-ego-browser'

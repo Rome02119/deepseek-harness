@@ -621,6 +621,31 @@ export interface Config {
 
 来源：[`packages/e2b/e2b/src/index.ts:43`](../packages/e2b/e2b/src/index.ts)
 
+<a id="deepseek-aidsh-ego-browser"></a>
+
+## `@deepseek-ai/dsh-ego-browser`
+
+依赖：`webServer` · `tools` · `web`
+
+```ts config-catalog
+/** Plugin configuration for ego-browser. */
+export interface EgoBrowserConfig {
+  /** Optional custom path to ego-browser binary executable. */
+  egoPath?: string
+  /** Whether to register EgoWebFetchProvider on ctx.web (default true). */
+  registerFetchProvider?: boolean
+  /** Whether to register model-facing tools on ctx.tools (default true). */
+  registerTools?: boolean
+  /** Operation timeout in milliseconds (default 30000). */
+  timeoutMs?: number
+  /** Maximum decoded body length in characters (default 100000). */
+  maxBodyChars?: number
+}
+```
+
+来源：[`packages/extensions/ego-browser/src/index.ts:61`](../packages/extensions/ego-browser/src/index.ts)
+
+
 <a id="deepseek-aidsh-experimental-agent-team"></a>
 
 ## `@deepseek-ai/dsh-experimental-agent-team`
