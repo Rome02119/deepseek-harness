@@ -643,7 +643,7 @@ export interface EgoBrowserConfig {
 }
 ```
 
-来源：[`packages/extensions/ego-browser/src/index.ts:61`](../packages/extensions/ego-browser/src/index.ts)
+来源：[`packages/extensions/ego-browser/src/index.ts:62`](../packages/extensions/ego-browser/src/index.ts)
 
 
 <a id="deepseek-aidsh-experimental-agent-team"></a>

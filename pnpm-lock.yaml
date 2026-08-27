@@ -4455,6 +4455,9 @@ importers:
       '@deepseek-ai/dsh-web':
         specifier: workspace:^
         version: link:../../web/web
+      '@deepseek-ai/dsh-x-auth':
+        specifier: workspace:^
+        version: link:../dsh-x-auth
 
   packages/extensions/live-agent-view:
     devDependencies:
@@ -4513,6 +4516,9 @@ importers:
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-x-auth':
+        specifier: workspace:^
+        version: link:../dsh-x-auth
 
   packages/extensions/terminal-herdr:
     dependencies:

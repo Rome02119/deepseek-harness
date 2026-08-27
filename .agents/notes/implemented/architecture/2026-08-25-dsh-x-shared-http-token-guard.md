@@ -6,11 +6,11 @@ English | [中文](2026-08-25-dsh-x-shared-http-token-guard.zh.md)
 
 ## Problem
 
-Every DSH-X plugin route — `dsh-x-ui`, `notebooklm`, `x-command-center`, `live-agent-view` — served unauthenticated HTTP. The deployment binds a tailnet, so any tailnet peer could open an interactive PTY, add or toggle a Loader plugin (an arbitrary module load, and therefore remote code execution), create and delete cron schedules, add NotebookLM sources, and drive Agent Teams. The pages themselves are the mutation UI, so a page-only exemption would have left the whole surface open. The routes also had no concurrency or body-size bound, so one peer could exhaust PTYs or memory.
+Every DSH-X overlay route — `dsh-x-ui`, `notebooklm`, `x-command-center`, `live-agent-view`, `ego-browser`, and `subscription-quota` — served unauthenticated HTTP. The deployment binds a tailnet, so any tailnet peer could open an interactive PTY, add or toggle a Loader plugin (an arbitrary module load, and therefore remote code execution), create and delete cron schedules, add NotebookLM sources, execute browser automation JavaScript, and drive Agent Teams. The pages themselves are the mutation UI, so a page-only exemption would have left the whole surface open. The routes also had no concurrency or body-size bound, so one peer could exhaust PTYs or memory.
 
 ## Decision
 
-`@deepseek-ai/dsh-x-auth` owns the single guard; each DSH-X plugin wraps every route it registers in `dshXAuth`. The package is a library — it registers no plugin, so nothing about the guard depends on mount order.
+`@deepseek-ai/dsh-x-auth` owns the single guard; each DSH-X overlay plugin wraps every route it registers in `dshXAuth`. The package is a library — it registers no plugin, so nothing about the guard depends on mount order.
 
 A request is authorized when its socket peer address is loopback, or when it presents the token. Loopback is read from `req.socket.remoteAddress` alone: `X-Forwarded-For` and every other client-supplied header is untrusted here, because a tailnet peer sets them freely. `::ffff:127.0.0.1` counts as loopback because Node reports IPv4 peers that way on a dual-stack listener.
 
@@ -34,7 +34,7 @@ The token is accepted as `Authorization: Bearer`, as a `dsh_x_token` cookie, or 
 
 ## Testing
 
-`packages/extensions/dsh-x-auth/tests/auth.spec.ts` and `packages/extensions/dsh-x-ui/tests/route-guard.spec.ts` drive the real registered handlers over a real HTTP server whose socket reports a tailnet peer address, so a remote caller is exercised without a second interface. The `dsh-x-ui` suite mounts the control page over the real PTY registry with a stub backend, so the concurrency count comes from the service rather than from the assertion.
+`packages/extensions/dsh-x-auth/tests/auth.spec.ts`, `packages/extensions/dsh-x-ui/tests/route-guard.spec.ts`, and `packages/extensions/ego-browser/tests/ego-browser.spec.ts` drive real registered handlers over a real HTTP server whose socket reports a tailnet peer address, so a remote caller is exercised without a second interface. The `dsh-x-ui` suite mounts the control page over the real PTY registry with a stub backend, so the concurrency count comes from the service rather than from the assertion.
 
 ## Consequences
 

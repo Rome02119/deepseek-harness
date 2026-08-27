@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-Shared HTTP guard for the DSH-X pages. Every DSH-X plugin route — `dsh-x-ui`, `notebooklm`, `x-command-center`, and `live-agent-view` — wraps its handler in `dshXAuth` so a tailnet peer cannot reach a shell, a Loader plugin mutation, a cron schedule, or a Team action without the token.
+Shared HTTP guard for the DSH-X pages. Every DSH-X overlay route — `dsh-x-ui`, `notebooklm`, `x-command-center`, `live-agent-view`, `ego-browser`, and `subscription-quota` — wraps its handler in `dshXAuth` so a tailnet peer cannot reach a shell, a Loader plugin mutation, a cron schedule, a browser automation script, or a Team action without the token.
 
 ## Authorization
 

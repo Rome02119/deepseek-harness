@@ -4,6 +4,8 @@
 
 通过本地 `ego-browser` CLI 为 DSH-X 提供 ego-browser (ego lite) 集成。该包在 `ctx.web` 上提供可选的 `WebFetchProvider`，在 `/ego-browser` 提供交互式浏览器管理页面，提供 JSON API 端点，并在 `ctx.tools` 上注册面向模型的智能体工具（`ego_browser_navigate`、`ego_browser_taskspaces`）。
 
+每条 HTTP 路由都对非回环对端使用 DSH-X 令牌守卫，其中包括执行浏览器自动化 JavaScript 的 `/ego-browser/api/eval`。
+
 ## Web and API routes
 
 - `GET /ego-browser` — 交互式浏览器管理页面，展示实时 CLI 状态、任务空间浏览器、提供商选择器和导航检查器。

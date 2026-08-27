@@ -3,6 +3,7 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type { ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { dshXAuth } from '@deepseek-ai/dsh-x-auth'
 
 /** One quota field; unavailable provider data stays explicitly unknown. */
 export type QuotaValue = number | 'unknown'
@@ -100,14 +101,14 @@ export class SubscriptionQuotaService extends Service {
   [Service.init](): void {
     const json: WebRoute = {
       kind: 'exact', path: '/subscription-quota.json',
-      handler: (_req, res) => { sendJson(res, this.snapshot()) },
+      handler: dshXAuth((_req, res) => { sendJson(res, this.snapshot()) }),
     }
     const page: WebRoute = {
       kind: 'exact', path: '/subscription-quota',
-      handler: (_req, res) => {
+      handler: dshXAuth((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
         res.end(PAGE)
-      },
+      }),
     }
     this.ctx.effect(() => this.ctx.webServer.register(json), 'rome-subscription-quota: json')
     this.ctx.effect(() => this.ctx.webServer.register(page), 'rome-subscription-quota: page')

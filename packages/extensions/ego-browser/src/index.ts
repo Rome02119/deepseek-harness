@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import { DshXBodyTooLargeError, dshXAuth, readDshXBody } from '@deepseek-ai/dsh-x-auth'
 import type {} from '@deepseek-ai/dsh-web'
 import {
   findEgoBinary,
@@ -216,29 +217,29 @@ export class EgoBrowserService extends Service {
     const pageRoute: WebRoute = {
       kind: 'exact',
       path: '/ego-browser',
-      handler: (_req, res) => {
+      handler: dshXAuth((_req, res) => {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
         res.end(EGO_BROWSER_PAGE)
-      },
+      }),
     }
 
     const statusApiRoute: WebRoute = {
       kind: 'exact',
       path: '/ego-browser/api/status',
-      handler: async (_req, res) => {
+      handler: dshXAuth(async (_req, res) => {
         try {
           const s = await this.status()
           sendJson(res, 200, s)
         } catch (err) {
           sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     const navigateApiRoute: WebRoute = {
       kind: 'exact',
       path: '/ego-browser/api/navigate',
-      handler: async (req, res) => {
+      handler: dshXAuth(async (req, res) => {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'Method not allowed' })
           return
@@ -252,15 +253,15 @@ export class EgoBrowserService extends Service {
           const result = await this.navigate(body.url.trim(), body.taskSpace?.trim())
           sendJson(res, 200, result)
         } catch (err) {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+          sendJson(res, err instanceof DshXBodyTooLargeError ? 413 : 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     const evalApiRoute: WebRoute = {
       kind: 'exact',
       path: '/ego-browser/api/eval',
-      handler: async (req, res) => {
+      handler: dshXAuth(async (req, res) => {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'Method not allowed' })
           return
@@ -274,15 +275,15 @@ export class EgoBrowserService extends Service {
           const result = await this.eval(body.script)
           sendJson(res, 200, result)
         } catch (err) {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+          sendJson(res, err instanceof DshXBodyTooLargeError ? 413 : 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     const selectProviderRoute: WebRoute = {
       kind: 'exact',
       path: '/ego-browser/api/select-provider',
-      handler: async (req, res) => {
+      handler: dshXAuth(async (req, res) => {
         if (req.method !== 'POST') {
           sendJson(res, 405, { error: 'Method not allowed' })
           return
@@ -293,9 +294,9 @@ export class EgoBrowserService extends Service {
           this.selectFetchProvider(providerId)
           sendJson(res, 200, { success: true, activeProvider: providerId })
         } catch (err) {
-          sendJson(res, 500, { error: err instanceof Error ? err.message : String(err) })
+          sendJson(res, err instanceof DshXBodyTooLargeError ? 413 : 500, { error: err instanceof Error ? err.message : String(err) })
         }
-      },
+      }),
     }
 
     this.ctx.effect(() => this.ctx.webServer.register(pageRoute), 'ego-browser: page route')
@@ -307,15 +308,7 @@ export class EgoBrowserService extends Service {
 }
 
 async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of req) {
-    if (typeof chunk === 'string') {
-      chunks.push(Buffer.from(chunk))
-    } else if (chunk instanceof Uint8Array) {
-      chunks.push(chunk)
-    }
-  }
-  const text = Buffer.concat(chunks).toString('utf8')
+  const text = (await readDshXBody(req)).toString('utf8')
   if (text.trim().length === 0) return {} as T
   return JSON.parse(text) as T
 }

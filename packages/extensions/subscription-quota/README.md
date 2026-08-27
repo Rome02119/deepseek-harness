@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 Read-only subscription/quota projection for Claude Code, Codex, Antigravity, and a local OmniRoute instance. It reports provider-owned values only; unavailable usage, limits, and remaining quota are the literal string `unknown`. The plugin registers `/subscription-quota.json` and `/subscription-quota` on `ctx.webServer`.
 
+Both routes use the DSH-X token guard for non-loopback peers.
+
 The package does not count tokens, call provider APIs, store credentials, or mutate provider state. It is separate from DSH's compaction token meter.
 
 ## Model Experience

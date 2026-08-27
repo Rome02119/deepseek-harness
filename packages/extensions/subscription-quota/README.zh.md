@@ -4,6 +4,8 @@
 
 这是 Claude Code、Codex、Antigravity 和本地 OmniRoute 的只读订阅/配额视图。它只报告提供方实际给出的值；无法取得的使用量、上限和剩余额度统一显示为字符串 `unknown`。插件在 `ctx.webServer` 上注册 `/subscription-quota.json` 和 `/subscription-quota`。
 
+两条路由都对非回环对端使用 DSH-X 令牌守卫。
+
 本包不统计 token、不调用提供方 API、不保存凭据，也不修改提供方状态。它与 DSH 的压缩压力 token meter 分开。
 
 ## Model Experience

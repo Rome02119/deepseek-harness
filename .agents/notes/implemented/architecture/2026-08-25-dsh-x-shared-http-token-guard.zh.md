@@ -6,11 +6,11 @@ Status: implemented
 
 ## Problem
 
-每一条 DSH-X 插件路由——`dsh-x-ui`、`notebooklm`、`x-command-center`、`live-agent-view`——都以未认证方式提供 HTTP 服务。该部署绑定在 tailnet 上，因此 tailnet 上的任意对端都可以打开交互式 PTY、添加或切换 Loader 插件（即任意模块加载，也就是远程代码执行）、创建和删除 cron 计划、添加 NotebookLM 源，以及驱动 Agent Teams。页面本身就是变更 UI，所以「只放行页面」会让整个面暴露。这些路由也没有并发或请求体大小的上限，因此一个对端就能耗尽 PTY 或内存。
+每一条 DSH-X overlay 路由——`dsh-x-ui`、`notebooklm`、`x-command-center`、`live-agent-view`、`ego-browser` 和 `subscription-quota`——都以未认证方式提供 HTTP 服务。该部署绑定在 tailnet 上，因此 tailnet 上的任意对端都可以打开交互式 PTY、添加或切换 Loader 插件（即任意模块加载，也就是远程代码执行）、创建和删除 cron 计划、添加 NotebookLM 源、执行浏览器自动化 JavaScript，以及驱动 Agent Teams。页面本身就是变更 UI，所以「只放行页面」会让整个面暴露。这些路由也没有并发或请求体大小的上限，因此一个对端就能耗尽 PTY 或内存。
 
 ## Decision
 
-`@deepseek-ai/dsh-x-auth` 拥有唯一的守卫；每个 DSH-X 插件都用 `dshXAuth` 包装它注册的每一条路由。该包是一个库——它不注册插件，因此守卫的任何行为都不依赖挂载顺序。
+`@deepseek-ai/dsh-x-auth` 拥有唯一的守卫；每个 DSH-X overlay 插件都用 `dshXAuth` 包装它注册的每一条路由。该包是一个库——它不注册插件，因此守卫的任何行为都不依赖挂载顺序。
 
 当请求的 socket 对端地址是回环地址，或请求出示了令牌时，该请求获得授权。回环判定只读取 `req.socket.remoteAddress`：`X-Forwarded-For` 和其他所有客户端提供的 header 在这里都不可信，因为 tailnet 对端可以随意设置它们。`::ffff:127.0.0.1` 也算回环，因为在双栈监听器上 Node 就是这样报告 IPv4 对端的。
 
@@ -34,7 +34,7 @@ Status: implemented
 
 ## Testing
 
-`packages/extensions/dsh-x-auth/tests/auth.spec.ts` 和 `packages/extensions/dsh-x-ui/tests/route-guard.spec.ts` 通过真实 HTTP 服务器驱动真实注册的 handler，而该服务器的 socket 报告一个 tailnet 对端地址，因此无需第二个网络接口就能演练远程调用方。`dsh-x-ui` 套件把控制页挂载在真实的 PTY 注册表加 stub backend 之上，因此并发计数来自服务本身而不是断言。
+`packages/extensions/dsh-x-auth/tests/auth.spec.ts`、`packages/extensions/dsh-x-ui/tests/route-guard.spec.ts` 和 `packages/extensions/ego-browser/tests/ego-browser.spec.ts` 通过真实 HTTP 服务器驱动真实注册的 handler，而该服务器的 socket 报告一个 tailnet 对端地址，因此无需第二个网络接口就能演练远程调用方。`dsh-x-ui` 套件把控制页挂载在真实的 PTY 注册表加 stub backend 之上，因此并发计数来自服务本身而不是断言。
 
 ## Consequences
 

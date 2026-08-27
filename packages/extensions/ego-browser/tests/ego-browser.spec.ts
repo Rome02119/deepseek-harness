@@ -6,11 +6,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import { WebRuntime } from '@deepseek-ai/dsh-web'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
+import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import Invariants from '@deepseek-ai/dsh-invariants'
 import * as EgoInvariant from '../src/invariant.ts'
 import {
@@ -82,6 +85,36 @@ describe('@deepseek-ai/dsh-ego-browser', () => {
     expect(typeof statusJson.installed).toBe('boolean')
 
     await ctx.fiber.dispose()
+  })
+
+  it('refuses untokenised tailnet access to every ego-browser route', async () => {
+    const token = 'a'.repeat(64)
+    const previousToken = process.env.DSH_X_TOKEN
+    process.env.DSH_X_TOKEN = token
+    const routes = new Map<string, WebRoute['handler']>()
+    const ctx = new Context()
+    ctx.provide('webServer', { register: (route: WebRoute) => { routes.set(route.path, route.handler); return () => {} } } as never)
+    ctx.provide('tools', {} as never)
+    ctx.provide('web', {} as never)
+    const server = createServer((req, res) => {
+      const handler = routes.get(new URL(req.url ?? '/', 'http://dsh-x.invalid').pathname)
+      if (handler === undefined) { res.writeHead(404); res.end(); return }
+      void handler(req, res)
+    })
+    server.on('connection', (socket) => { Object.defineProperty(socket, 'remoteAddress', { value: '100.64.0.5', configurable: true }) })
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve) })
+    try {
+      await ctx.plugin(EgoBrowserService, { registerFetchProvider: false, registerTools: false })
+      const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+      for (const path of ['/ego-browser', '/ego-browser/api/status', '/ego-browser/api/navigate', '/ego-browser/api/eval', '/ego-browser/api/select-provider']) {
+        expect((await fetch(`${origin}${path}`)).status, path).toBe(401)
+      }
+    } finally {
+      await ctx.fiber.dispose()
+      await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
+      if (previousToken === undefined) delete process.env.DSH_X_TOKEN
+      else process.env.DSH_X_TOKEN = previousToken
+    }
   })
 
   it('provides model-facing tools with proper schemas', () => {

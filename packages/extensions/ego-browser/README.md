@@ -4,6 +4,8 @@ English | [中文](README.zh.md)
 
 ego-browser (ego lite) integration for DSH-X via the local `ego-browser` CLI. The package provides a selectable `WebFetchProvider` on `ctx.web`, an interactive browser management page at `/ego-browser`, JSON API endpoints, and model-facing agent tools (`ego_browser_navigate`, `ego_browser_taskspaces`) registered on `ctx.tools`.
 
+Every HTTP route uses the DSH-X token guard for non-loopback peers. This includes `/ego-browser/api/eval`, which executes browser automation JavaScript.
+
 ## Web and API routes
 
 - `GET /ego-browser` — Interactive browser management page with live CLI status, task space browser, provider selector, and navigation inspector.

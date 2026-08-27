@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-这是 DSH-X 页面共用的 HTTP 守卫。每个 DSH-X 插件路由——`dsh-x-ui`、`notebooklm`、`x-command-center` 和 `live-agent-view`——都用 `dshXAuth` 包装其 handler，因此 tailnet 上的对端在没有令牌时无法访问 shell、Loader 插件变更、cron 计划或 Team 操作。
+这是 DSH-X 页面共用的 HTTP 守卫。每个 DSH-X overlay 路由——`dsh-x-ui`、`notebooklm`、`x-command-center`、`live-agent-view`、`ego-browser` 和 `subscription-quota`——都用 `dshXAuth` 包装其 handler，因此 tailnet 上的对端在没有令牌时无法访问 shell、Loader 插件变更、cron 计划、浏览器自动化脚本或 Team 操作。
 
 ## 授权
 
