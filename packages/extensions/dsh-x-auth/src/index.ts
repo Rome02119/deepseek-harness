@@ -1,7 +1,7 @@
 /** Shared token authentication for DSH-X HTTP routes. */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { join } from 'node:path'
 const TOKEN_DIR = join(homedir(), '.dsh-x')
 const TOKEN_FILE = join(TOKEN_DIR, 'token')
 const COOKIE = 'dsh_x_token='
+const MIN_TOKEN_LENGTH = 32
 
 /** Maximum accepted HTTP request-body bytes for DSH-X routes. */
 export const MAX_REQUEST_BODY_BYTES = 1024 * 1024
@@ -45,9 +46,9 @@ export function dshXAuth(handler: DshXHandler): DshXHandler {
  * @returns `true` when the wrapped handler may run.
  */
 export function requireDshXAuth(req: IncomingMessage, res: ServerResponse): boolean {
-  if (isLoopback(req.socket.remoteAddress)) return true
+  if (isLoopback(req.socket.remoteAddress) && isSameLoopbackOrigin(req) && hasSafeMutationContentType(req)) return true
   const url = new URL(req.url ?? '/', 'http://dsh-x.invalid')
-  const queryToken = url.searchParams.get('token')
+  const queryToken = req.method === 'GET' ? url.searchParams.get('token') : null
   const presented = bearerToken(req.headers.authorization) ?? cookieToken(req.headers.cookie) ?? queryToken
   if (!matchesToken(presented)) {
     res.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'text/html; charset=utf-8' })
@@ -101,6 +102,25 @@ function isLoopback(address: string | undefined): boolean {
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
 }
 
+function isSameLoopbackOrigin(req: IncomingMessage): boolean {
+  if (!isLoopbackHost(req.headers.host)) return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  try {
+    return isLoopbackHost(new URL(origin).host)
+  } catch {
+    return false
+  }
+}
+
+function isLoopbackHost(value: string | undefined): boolean {
+  return value !== undefined && /^(?:127\.0\.0\.1|localhost)(?::\d+)?$|^\[::1\](?::\d+)?$/.test(value)
+}
+
+function hasSafeMutationContentType(req: IncomingMessage): boolean {
+  return req.method === 'GET' || req.method === 'HEAD' || req.headers['content-type']?.split(';', 1)[0] === 'application/json'
+}
+
 function bearerToken(value: string | string[] | undefined): string | undefined {
   const header = Array.isArray(value) ? value[0] : value
   return /^Bearer (.+)$/.exec(header ?? '')?.[1]
@@ -112,7 +132,7 @@ function cookieToken(cookie: string | undefined): string | undefined {
 }
 
 function matchesToken(presented: string | null | undefined): boolean {
-  if (presented === undefined || presented === null) return false
+  if (presented === undefined || presented === null || presented.length < MIN_TOKEN_LENGTH) return false
   const expected = Buffer.from(dshXToken())
   const actual = Buffer.from(presented)
   return expected.length === actual.length && timingSafeEqual(expected, actual)
@@ -131,7 +151,9 @@ function dshXToken(): string {
 
 function readTokenFile(): string | undefined {
   try {
-    return readFileSync(TOKEN_FILE, 'utf8').trim()
+    repairTokenPermissions()
+    const token = readFileSync(TOKEN_FILE, 'utf8').trim()
+    return token.length >= MIN_TOKEN_LENGTH ? token : undefined
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     return undefined
@@ -147,6 +169,15 @@ function createTokenFile(): string {
   } catch (error) {
     // A concurrent DSH-X process won the create race; its token is the shared one.
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    return readFileSync(TOKEN_FILE, 'utf8').trim()
+    const existing = readTokenFile()
+    if (existing !== undefined) return existing
+    writeFileSync(TOKEN_FILE, token, { encoding: 'utf8', mode: 0o600 })
+    repairTokenPermissions()
+    return token
   }
+}
+
+function repairTokenPermissions(): void {
+  if ((statSync(TOKEN_DIR).mode & 0o777) !== 0o700) chmodSync(TOKEN_DIR, 0o700)
+  if ((statSync(TOKEN_FILE).mode & 0o777) !== 0o600) chmodSync(TOKEN_FILE, 0o600)
 }

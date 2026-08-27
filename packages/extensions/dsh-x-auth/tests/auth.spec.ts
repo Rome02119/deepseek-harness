@@ -60,11 +60,33 @@ describe('dshXAuth over HTTP', () => {
     expect(calls).toEqual([])
   })
 
-  it('admits a loopback peer with no token at all', async () => {
+  it('admits a same-origin loopback peer with no token at all', async () => {
     process.env.DSH_X_TOKEN = TOKEN
     const { origin, calls } = await serve('127.0.0.1')
     expect((await fetch(`${origin}/dsh-x`)).status).toBe(200)
     expect(calls).toEqual(['/dsh-x'])
+  })
+
+  it('refuses an attacker Host or Origin on a loopback socket', async () => {
+    process.env.DSH_X_TOKEN = TOKEN
+    const { origin, calls } = await serve('127.0.0.1')
+    const response = await fetch(`${origin}/dsh-x/api/plugins/add`, {
+      method: 'POST',
+      headers: { host: 'attacker.example', origin: 'https://attacker.example', 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
+  })
+
+  it('refuses a form-style mutation from a loopback peer', async () => {
+    process.env.DSH_X_TOKEN = TOKEN
+    const { origin, calls } = await serve('127.0.0.1')
+    const response = await fetch(`${origin}/dsh-x/api/plugins/add`, {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'name=evil',
+    })
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
   })
 
   it('ignores a forged X-Forwarded-For claiming loopback', async () => {
@@ -96,12 +118,12 @@ describe('dshXAuth over HTTP', () => {
     expect(calls).toEqual([])
   })
 
-  it('accepts a query token on a non-GET request without redirecting', async () => {
+  it('refuses a query token on a non-GET request', async () => {
     process.env.DSH_X_TOKEN = TOKEN
     const { origin, calls } = await serve('100.64.0.5')
     const response = await fetch(`${origin}/dsh-x/api/state?token=${TOKEN}`, { method: 'POST', body: '{}' })
-    expect(response.status).toBe(200)
-    expect(calls).toHaveLength(1)
+    expect(response.status).toBe(401)
+    expect(calls).toEqual([])
   })
 })
 
