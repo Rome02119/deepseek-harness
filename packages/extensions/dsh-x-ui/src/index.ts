@@ -68,6 +68,7 @@ export const inject = ['agents', 'loader', 'sessions', 'terminals', 'webServer']
 /** Host service backing the DSH-X browser control page. */
 export class DshXUiService extends Service {
   static inject = inject
+  private pendingPtyOpens = 0
 
   constructor(ctx: Context) {
     super(ctx, 'dshXUi')
@@ -153,13 +154,18 @@ export class DshXUiService extends Service {
   }
 
   private async openTerminal(body: JsonRecord): Promise<unknown> {
-    if (this.agents().flatMap(agent => this.ctx.terminals.list(agent)).filter(session => session.status.kind === 'running').length >= MAX_CONCURRENT_PTYS) {
+    if (this.agents().flatMap(agent => this.ctx.terminals.list(agent)).filter(session => session.status.kind === 'running').length + this.pendingPtyOpens >= MAX_CONCURRENT_PTYS) {
       const error = Object.assign(new Error('too many open PTYs'), { status: 429 })
       throw error
     }
+    this.pendingPtyOpens += 1
     const name = optionalString(body, 'name')
     const type = optionalString(body, 'type') ?? (this.ctx.terminals.listBackends().includes('herdr') ? 'herdr' : 'shell')
-    return this.ctx.terminals.spawn(this.agent(body), { type, ...name === undefined ? {} : { name } })
+    try {
+      return await this.ctx.terminals.spawn(this.agent(body), { type, ...name === undefined ? {} : { name } })
+    } finally {
+      this.pendingPtyOpens -= 1
+    }
   }
 
   private async sendTerminal(body: JsonRecord): Promise<unknown> {

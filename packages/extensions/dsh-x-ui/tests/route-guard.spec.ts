@@ -59,7 +59,7 @@ interface Harness {
  * serve its registered routes from a socket that reports a tailnet peer, so a
  * remote caller can be exercised without a second interface.
  */
-async function harness(): Promise<Harness> {
+async function harness(delaySpawn = false): Promise<Harness> {
   process.env.DSH_X_TOKEN = TOKEN
   const ctx = new Context()
   const routes = new Map<string, WebRoute['handler']>()
@@ -77,7 +77,11 @@ async function harness(): Promise<Harness> {
   await ctx.plugin(TerminalSessionService)
   const backend: TerminalBackend = {
     type: 'shell',
-    spawn: () => { state.spawned += 1; return Promise.resolve(new StubTerminalSession()) },
+    spawn: async () => {
+      state.spawned += 1
+      if (delaySpawn) await new Promise((resolve) => { setTimeout(resolve, 20) })
+      return new StubTerminalSession()
+    },
   }
   ctx.terminals.registerBackend(backend)
 
@@ -156,6 +160,19 @@ describe('DSH-X control routes', () => {
     expect(h.spawned).toBe(MAX_CONCURRENT_PTYS)
     expect(await post(h.origin, '/dsh-x/api/terminal/open', { agentId: String(h.agent.id) }, TOKEN)).toBe(429)
     expect(h.spawned).toBe(MAX_CONCURRENT_PTYS)
+  })
+
+  it('reserves the final PTY slot while a spawn is pending', async () => {
+    const h = await harness(true)
+    for (let index = 0; index < MAX_CONCURRENT_PTYS - 1; index += 1) {
+      await h.terminals.spawn(h.agent, { type: 'shell', name: `seed-${index}` })
+    }
+    const statuses = await Promise.all([
+      post(h.origin, '/dsh-x/api/terminal/open', { agentId: String(h.agent.id) }, TOKEN),
+      post(h.origin, '/dsh-x/api/terminal/open', { agentId: String(h.agent.id) }, TOKEN),
+    ])
+    expect(statuses.sort()).toEqual([200, 429])
+    expect(h.terminals.list(h.agent)).toHaveLength(MAX_CONCURRENT_PTYS)
   })
 
   it('refuses a request body past the cap with 413', async () => {
