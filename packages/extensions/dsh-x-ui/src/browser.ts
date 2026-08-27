@@ -241,7 +241,7 @@ try {
     return new Promise((resolve, reject) => {
       const child = spawn(egoBin, ['nodejs'], {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: `${join(homedir(), '.local', 'bin')}:${process.env.PATH ?? ''}` },
+        env: { HOME: homedir(), PATH: `${join(homedir(), '.local', 'bin')}:${process.env.PATH ?? ''}` },
       })
 
       let stdout = ''
@@ -274,8 +274,8 @@ try {
       cmd = 'open'
       args = [targetUrl]
     } else if (process.platform === 'win32') {
-      cmd = 'cmd.exe'
-      args = ['/c', 'start', '', targetUrl]
+      cmd = 'explorer.exe'
+      args = [targetUrl]
     } else {
       cmd = 'xdg-open'
       args = [targetUrl]

@@ -314,7 +314,7 @@ describe('Agent Teams fold', () => {
     ])).toThrow(/invalid pending -> completed transition/)
   })
 
-  it('replays a verification accepted by the API authorship and membership rules', () => {
+  it('rejects a verification when the Lead authored the task without a provider', () => {
     const verification = receipt()
     const records = [...memberHistory('active'), ...taskReviewHistory(2)]
     const state = foldTeam(ROOT, records)
@@ -325,8 +325,7 @@ describe('Agent Teams fold', () => {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 4, status: 'completed', ownerId: ROOT, receipt: verification }),
-    }, 5)) }).not.toThrow()
-    expect(state.tasks.get(TeamTaskId('task-1'))).toMatchObject({ status: 'completed', receipt: verification })
+    }, 5)) }).toThrow(/verified by its worker provider/)
   })
 
   it('rejects a forged completed event when verifier shares roster provider with an author even if receipt lies', () => {
@@ -404,7 +403,7 @@ describe('Agent Teams fold', () => {
     })
   })
 
-  it('replays verification by an assignee who never acted on the task', () => {
+  it('rejects verification of a Lead-authored task by an assignee who never acted on it', () => {
     const verification = receipt()
     const records = [
       ...memberHistory('active'),
@@ -431,7 +430,7 @@ describe('Agent Teams fold', () => {
       }, 6),
     ]
 
-    expect(() => foldTeam(ROOT, records)).not.toThrow()
+    expect(() => foldTeam(ROOT, records)).toThrow(/verified by its worker provider/)
   })
 
   it('enforces verification blocking through the shared failure-cap predicate', () => {
@@ -554,7 +553,7 @@ describe('Agent Teams fold', () => {
     expect(() => foldTeam(ROOT, records)).not.toThrow()
   })
 
-  it('replays an API-accepted claim, renew, release, reclaim, complete, and verify sequence', () => {
+  it('rejects a verification history containing a Lead author without a provider', () => {
     const records = [
       event('team/member', {
         version: 1,
@@ -605,7 +604,7 @@ describe('Agent Teams fold', () => {
       }, 8),
     ]
 
-    expect(() => foldTeam(ROOT, records)).not.toThrow()
+    expect(() => foldTeam(ROOT, records)).toThrow(/verified by its worker provider/)
   })
 
   it.each([

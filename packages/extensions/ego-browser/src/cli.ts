@@ -166,7 +166,7 @@ export async function runEgoScript(
 
     const child = spawn(bin, ['nodejs'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PATH: `${join(homedir(), '.local', 'bin')}:${process.env.PATH ?? ''}` },
+      env: { HOME: homedir(), PATH: `${join(homedir(), '.local', 'bin')}:${process.env.PATH ?? ''}` },
     })
 
     let stdout = ''

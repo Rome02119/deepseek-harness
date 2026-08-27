@@ -422,11 +422,11 @@ export function applyTeamEvent(state: TeamFoldState, event: SessionEvent): void 
         if (isTaskAuthor(task, receipt.verifierId)) {
           throw new Error(`team task "${task.id}" was verified by one of its authors`)
         }
-        if (isVerifierSameProvider(state, task, receipt.verifierId)) {
-          throw new Error(`team task "${task.id}" was verified by its worker provider`)
-        }
         if (!isActiveTeamMember(state, receipt.verifierId)) {
           throw new Error(`team task "${task.id}" was verified by inactive or unknown member "${receipt.verifierId}"`)
+        }
+        if (isVerifierSameProvider(state, task, receipt.verifierId)) {
+          throw new Error(`team task "${task.id}" was verified by its worker provider`)
         }
       }
       assertTaskGraphCandidate(state.tasks, task)
