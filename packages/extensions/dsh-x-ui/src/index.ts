@@ -245,7 +245,7 @@ export class DshXUiService extends Service {
 
   private entry(body: JsonRecord): Entry { const id = stringField(body, 'entryId'); return this.ctx.loader.resolve(id) }
 
-  private async jsonAction(req: IncomingMessage, res: ServerResponse, action: (body: JsonRecord) => Promise<unknown>): Promise<void> {
+  private async jsonAction(req: IncomingMessage, res: ServerResponse, action: (body: JsonRecord) => unknown): Promise<void> {
     try { sendJson(res, await action(await readJson(req))) } catch (error: unknown) { res.writeHead(error instanceof DshXBodyTooLargeError ? 413 : (error as { status?: number }).status ?? 400, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ error: error instanceof Error ? error.message : String(error) })) }
   }
 }
