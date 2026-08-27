@@ -295,13 +295,12 @@ describe('Agent Teams fold', () => {
     },
   )
 
-  it('accepts the Team Lead as verifier without a roster row', () => {
-    const state = foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2, CHILD), event('team/task', {
+  it('rejects the Team Lead as verifier without a roster provider', () => {
+    expect(() => foldTeam(ROOT, [...memberHistory('active'), ...taskReviewHistory(2, CHILD), event('team/task', {
       version: 1,
       teamId: TEAM,
       task: task({ revision: 4, status: 'completed', ownerId: CHILD, receipt: receipt({ verifierId: ROOT }) }),
-    }, 5)])
-    expect(state.tasks.get(TeamTaskId('task-1'))?.status).toBe('completed')
+    }, 5)])).toThrow(/verified by its worker provider/)
   })
 
   it('rejects an illegal pending -> completed task transition', () => {

@@ -237,11 +237,11 @@ export function isTaskVerificationBlocked(
 }
 
 /**
- * Test whether a candidate verifier shares a recorded roster provider with any task author.
+ * Test whether a verifier cannot be proven to use a provider different from every task author.
  * @param state - current Team fold containing recorded member providers.
  * @param task - task with durable authorship history.
  * @param verifierId - candidate verifier Session id.
- * @returns whether the verifier shares a recorded provider with an author.
+ * @returns whether either provider is unknown or the verifier shares a provider with an author.
  */
 export function isVerifierSameProvider(
   state: TeamFoldState,
@@ -249,8 +249,10 @@ export function isVerifierSameProvider(
   verifierId: SessionId,
 ): boolean {
   const verifierProvider = state.members.get(verifierId)?.provider
-  if (verifierProvider === undefined) return false
-  return task.authorIds.some(authorId => state.members.get(authorId)?.provider === verifierProvider)
+  return verifierProvider === undefined || task.authorIds.some((authorId) => {
+    const authorProvider = state.members.get(authorId)?.provider
+    return authorProvider === undefined || authorProvider === verifierProvider
+  })
 }
 
 /**
