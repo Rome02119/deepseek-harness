@@ -82,6 +82,10 @@ describe('@deepseek-ai/dsh-notebooklm', () => {
     const port = ctx.webServer.port
     expect(port).toBeGreaterThan(0)
 
+    for (const path of ['/notebooklm', '/notebooklm/api/notebooks', '/notebooklm/api/query', '/notebooklm/api/sources', '/notebooklm/api/doctor']) {
+      expect((await fetch(`http://127.0.0.1:${port}${path}`, { headers: { origin: 'https://attacker.example' } })).status, path).toBe(401)
+    }
+
     // Check HTML route
     const pageRes = await fetch(`http://127.0.0.1:${port}/notebooklm`)
     expect(pageRes.status).toBe(200)

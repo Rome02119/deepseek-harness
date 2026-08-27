@@ -12,11 +12,11 @@ Status: implemented
 
 `@deepseek-ai/dsh-x-auth` 拥有唯一的守卫；每个 DSH-X overlay 插件都用 `dshXAuth` 包装它注册的每一条路由。该包是一个库——它不注册插件，因此守卫的任何行为都不依赖挂载顺序。
 
-当请求的 socket 对端地址是回环地址，或请求出示了令牌时，该请求获得授权。回环判定只读取 `req.socket.remoteAddress`：`X-Forwarded-For` 和其他所有客户端提供的 header 在这里都不可信，因为 tailnet 对端可以随意设置它们。`::ffff:127.0.0.1` 也算回环，因为在双栈监听器上 Node 就是这样报告 IPv4 对端的。
+请求出示令牌时获得授权；socket 对端为回环时，还要求其 `Host` 和可选的 `Origin` 均为回环字面量（`127.0.0.1`、`[::1]` 或 `localhost`）。会改变状态的请求必须使用 `application/json`，因此简单的跨源表单不能调用变更端点。回环判定只读取 `req.socket.remoteAddress`：`X-Forwarded-For` 和其他所有客户端提供的 header 在这里都不可信，因为 tailnet 对端可以随意设置它们。`::ffff:127.0.0.1` 也算回环，因为在双栈监听器上 Node 就是这样报告 IPv4 对端的。
 
-令牌在 `DSH_X_TOKEN` 非空时取自它，否则取自 `~/.dsh-x/token`（32 个随机字节的十六进制，目录 `0700`，文件 `0600`）。`dshXAuth` 在注册路由时解析令牌，因此该文件自 DSH-X 启动起就存在——它是唯一能读出带令牌链接的地方，并且没有任何位置记录该令牌或把它放进错误响应体。比较使用 `crypto.timingSafeEqual` 在等长 buffer 上进行。
+令牌在 `DSH_X_TOKEN` 非空时取自它，否则取自 `~/.dsh-x/token`（32 个随机字节的十六进制，目录 `0700`，文件 `0600`）。读取时会修复这些权限，并重新生成空白或不合理短的文件。`dshXAuth` 在注册路由时解析令牌，因此该文件自 DSH-X 启动起就存在——它是唯一能读出带令牌链接的地方，并且没有任何位置记录该令牌或把它放进错误响应体。比较使用 `crypto.timingSafeEqual` 在等长且非空的 buffer 上进行。
 
-令牌可作为 `Authorization: Bearer`、`dsh_x_token` cookie，或 `?token=` 查询参数被接受。`GET` 上的查询令牌会得到一个指向同一路径（不含该参数）的 302，并带上 `Set-Cookie: dsh_x_token=…; HttpOnly; SameSite=Lax; Path=/`，因此一条带令牌的链接就能让手机登录，并把令牌移出地址栏。未授权的请求得到 401 和一个固定的 HTML 页面，该页面不会透露请求是否出示过令牌。
+令牌可作为 `Authorization: Bearer`、`dsh_x_token` cookie，或仅在 `GET` 上作为 `?token=` 查询参数被接受。`GET` 上的查询令牌会得到一个指向同一路径（不含该参数）的 302，并带上 `Set-Cookie: dsh_x_token=…; HttpOnly; SameSite=Lax; Path=/`，因此一条带令牌的链接就能让手机登录，并把令牌移出地址栏。未授权的请求得到 401 和一个固定的 HTML 页面，该页面不会透露请求是否出示过令牌。
 
 `readDshXBody` 将请求体上限设为 1 MiB，超过后暂停该请求并抛出 `DshXBodyTooLargeError`；路由把它映射为 413。暂停而非销毁很重要：销毁 socket 会让客户端收不到这个上限本该报告的 413，而且请求未被完整消费时，Node 本来就会在响应结束后关闭连接。`dsh-x-ui` 在运行中的会话达到 `MAX_CONCURRENT_PTYS` 后以 429 拒绝再次 spawn，`live-agent-view` 在 `error` 和 `close` 上都移除 SSE 客户端，`findNlmBinary` 会清除它的 abort 定时器。
 

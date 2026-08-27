@@ -60,6 +60,9 @@ describe('dsh-x-command-center', () => {
   it('serves timestamped rows and routes actions through Agent Teams', async () => {
     const ctx = await setup()
     const port = ctx.webServer.port
+    for (const path of ['/dsh-x-command-center', '/dsh-x-command-center.json', '/dsh-x-command-center/actions']) {
+      expect((await fetch(`http://127.0.0.1:${port}${path}`, { headers: { origin: 'https://attacker.example' } })).status, path).toBe(401)
+    }
     const page = await fetch(`http://127.0.0.1:${port}/dsh-x-command-center`).then(response => response.text())
     expect(page).toContain('Needs Rome')
 

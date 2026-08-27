@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-08-25-dsh-x-shared-http-token-guard.md
-2026-08-25-dsh-x-shared-http-token-guard.md: f776277ca68cb7241516cce7b1d94e6b094e7b39
-2026-08-25-dsh-x-shared-http-token-guard.zh.md: 92d4e4f29337d15c1aa27d841226023fec6cc94d
+2026-08-25-dsh-x-shared-http-token-guard.md: a957a295b71964227ebbb5ca7996944d0772e368
+2026-08-25-dsh-x-shared-http-token-guard.zh.md: 6855224261dd986881a873f5c3e4f4013c31382c

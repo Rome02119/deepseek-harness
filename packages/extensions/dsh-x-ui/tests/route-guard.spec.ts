@@ -145,6 +145,9 @@ describe('DSH-X control routes', () => {
       '/dsh-x/api/plugins/add',
       '/dsh-x/api/plugins/toggle',
       '/dsh-x/api/plugins/remove',
+      '/dsh-x/api/browser',
+      '/dsh-x/api/browser/select',
+      '/dsh-x/api/browser/launch',
     ]) {
       expect((await fetch(`${h.origin}${path}`)).status, path).toBe(401)
     }
