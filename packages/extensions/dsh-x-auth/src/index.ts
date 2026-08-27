@@ -46,13 +46,16 @@ export function dshXAuth(handler: DshXHandler): DshXHandler {
  * @returns `true` when the wrapped handler may run.
  */
 export function requireDshXAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  if (!hasSafeMutationContentType(req)) {
+    refuse(res)
+    return false
+  }
   if (isLoopback(req.socket.remoteAddress) && isSameLoopbackOrigin(req) && hasSafeMutationContentType(req)) return true
   const url = new URL(req.url ?? '/', 'http://dsh-x.invalid')
   const queryToken = req.method === 'GET' ? url.searchParams.get('token') : null
   const presented = bearerToken(req.headers.authorization) ?? cookieToken(req.headers.cookie) ?? queryToken
   if (!matchesToken(presented)) {
-    res.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'text/html; charset=utf-8' })
-    res.end('<!doctype html><meta charset="utf-8"><title>DSH-X</title><p>Open the tokenised DSH-X link to sign in.</p>')
+    refuse(res)
     return false
   }
   if (queryToken !== null && req.method === 'GET') {
@@ -66,6 +69,11 @@ export function requireDshXAuth(req: IncomingMessage, res: ServerResponse): bool
     return false
   }
   return true
+}
+
+function refuse(res: ServerResponse): void {
+  res.writeHead(401, { 'cache-control': 'no-store', 'content-type': 'text/html; charset=utf-8' })
+  res.end('<!doctype html><meta charset="utf-8"><title>DSH-X</title><p>Open the tokenised DSH-X link to sign in.</p>')
 }
 
 /**

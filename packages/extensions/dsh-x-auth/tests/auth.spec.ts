@@ -83,7 +83,7 @@ describe('dshXAuth over HTTP', () => {
     process.env.DSH_X_TOKEN = TOKEN
     const { origin, calls } = await serve('127.0.0.1')
     const response = await fetch(`${origin}/dsh-x/api/plugins/add`, {
-      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'name=evil',
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: `dsh_x_token=${TOKEN}` }, body: 'name=evil',
     })
     expect(response.status).toBe(401)
     expect(calls).toEqual([])
